@@ -1,4 +1,5 @@
 import { createKnowledgeGraph } from '../graph/graph.js';
+import { processGitNodes, linkGitModifiedEdges, type GitHistoryState } from './git-history-processor.js';
 import { processStructure } from './structure-processor.js';
 import { processParsing } from './parsing-processor.js';
 import {
@@ -33,9 +34,14 @@ const CHUNK_BYTE_BUDGET = 20 * 1024 * 1024; // 20MB
 /** Max AST trees to keep in LRU cache */
 const AST_CACHE_CAP = 50;
 
+export interface PipelineOptions {
+  gitHistory?: boolean;
+}
+
 export const runPipelineFromRepo = async (
   repoPath: string,
-  onProgress: (progress: PipelineProgress) => void
+  onProgress: (progress: PipelineProgress) => void,
+  options?: PipelineOptions,
 ): Promise<PipelineResult> => {
   const graph = createKnowledgeGraph();
   const ctx = createResolutionContext();
@@ -48,10 +54,19 @@ export const runPipelineFromRepo = async (
   };
 
   try {
+    // ── Phase 0: Git history — nodes only (Commit/Author/Branch) ─────
+    // MODIFIED edges are deferred to Phase 2.5 after File nodes exist.
+    let gitState: GitHistoryState | null = null;
+    if (options?.gitHistory) {
+      onProgress({ phase: 'git', percent: 0, message: 'Ingesting git history...' });
+      gitState = processGitNodes(graph, repoPath);
+      onProgress({ phase: 'git', percent: 5, message: 'Git history ingested' });
+    }
+
     // ── Phase 1: Scan paths only (no content read) ─────────────────────
     onProgress({
       phase: 'extracting',
-      percent: 0,
+      percent: options?.gitHistory ? 5 : 0,
       message: 'Scanning repository...',
     });
 
@@ -85,6 +100,11 @@ export const runPipelineFromRepo = async (
 
     const allPaths = scannedFiles.map(f => f.path);
     processStructure(graph, allPaths);
+
+    // ── Phase 2.5: Git MODIFIED edges (File nodes now exist) ──────────
+    if (gitState) {
+      linkGitModifiedEdges(graph, gitState);
+    }
 
     onProgress({
       phase: 'structure',

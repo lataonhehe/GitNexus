@@ -32,7 +32,11 @@ export type NodeLabel =
   | 'Delegate'
   | 'Annotation'
   | 'Constructor'
-  | 'Template';
+  | 'Template'
+  // Git history node types
+  | 'Commit'
+  | 'Branch'
+  | 'Author';
 
 
 import { SupportedLanguages } from '../../config/supported-languages.js';
@@ -66,6 +70,14 @@ export type NodeProperties = {
   // Method signature (for MRO disambiguation)
   parameterCount?: number,
   returnType?: string,
+  // Git history node properties
+  sha?: string,
+  message?: string,
+  email?: string,
+  timestamp?: number,
+  filesChanged?: number,
+  isCurrent?: boolean,
+  commitCount?: number,
 }
 
 export type RelationshipType =
@@ -82,6 +94,10 @@ export type RelationshipType =
   | 'HAS_METHOD'
   | 'MEMBER_OF'
   | 'STEP_IN_PROCESS'
+  // Git history relationship types
+  | 'MODIFIED'
+  | 'AUTHORED'
+  | 'ON_BRANCH'
 
 export interface GraphNode {
   id:  string,

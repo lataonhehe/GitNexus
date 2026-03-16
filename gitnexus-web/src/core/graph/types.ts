@@ -15,7 +15,11 @@ export type NodeLabel =
   | 'Type'
   | 'CodeElement'
   | 'Community'
-  | 'Process';
+  | 'Process'
+  // Git history node types
+  | 'Commit'
+  | 'Branch'
+  | 'Author';
 
 
 export type NodeProperties = {
@@ -41,6 +45,14 @@ export type NodeProperties = {
   // Entry point scoring (computed by process detection)
   entryPointScore?: number,
   entryPointReason?: string,
+  // Git history node properties
+  sha?: string,
+  message?: string,
+  email?: string,
+  timestamp?: number,
+  filesChanged?: number,
+  isCurrent?: boolean,
+  commitCount?: number,
 }
 
 export type RelationshipType = 
@@ -57,6 +69,10 @@ export type RelationshipType =
   | 'HAS_METHOD'
   | 'MEMBER_OF'
   | 'STEP_IN_PROCESS'
+  // Git history relationship types
+  | 'MODIFIED'
+  | 'AUTHORED'
+  | 'ON_BRANCH'
 
 export interface GraphNode {
   id:  string,

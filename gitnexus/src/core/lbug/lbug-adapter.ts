@@ -333,6 +333,15 @@ const getCopyQuery = (table: NodeTableName, filePath: string): string => {
   if (table === 'Process') {
     return `COPY ${t}(id, label, heuristicLabel, processType, stepCount, communities, entryPointId, terminalId) FROM "${filePath}" ${COPY_CSV_OPTS}`;
   }
+  if (table === 'Commit') {
+    return `COPY ${t}(id, name, sha, message, authorName, authorEmail, timestamp, filesChanged, filePath) FROM "${filePath}" ${COPY_CSV_OPTS}`;
+  }
+  if (table === 'Author') {
+    return `COPY ${t}(id, name, email, commitCount, filePath) FROM "${filePath}" ${COPY_CSV_OPTS}`;
+  }
+  if (table === 'Branch') {
+    return `COPY ${t}(id, name, isCurrent, filePath) FROM "${filePath}" ${COPY_CSV_OPTS}`;
+  }
   if (table === 'Method') {
     return `COPY ${t}(id, name, filePath, startLine, endLine, isExported, content, description, parameterCount, returnType) FROM "${filePath}" ${COPY_CSV_OPTS}`;
   }

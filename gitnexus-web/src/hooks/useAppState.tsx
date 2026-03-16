@@ -281,6 +281,9 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
 
   // Multi-repo switching
   const [serverBaseUrl, setServerBaseUrl] = useState<string | null>(null);
+  const serverBaseUrlRef = useRef<string | null>(null);
+  // Keep ref in sync so runQuery/isDatabaseReady callbacks never go stale
+  useEffect(() => { serverBaseUrlRef.current = serverBaseUrl; }, [serverBaseUrl]);
   const [availableRepos, setAvailableRepos] = useState<RepoSummary[]>([]);
 
   // Embedding state
@@ -467,12 +470,33 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const runQuery = useCallback(async (cypher: string): Promise<any[]> => {
+    // In backend mode, route Cypher queries to the local server's /api/query endpoint
+    const serverUrl = serverBaseUrlRef.current;
+    if (serverUrl) {
+      const { normalizeServerUrl } = await import('../services/server-connection');
+      const base = normalizeServerUrl(serverUrl);
+      const res = await fetch(`${base}/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cypher }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error(err.error || `Query failed: ${res.status}`);
+      }
+      const data = await res.json();
+      return data.result ?? [];
+    }
+
     const api = apiRef.current;
     if (!api) throw new Error('Worker not initialized');
     return api.runQuery(cypher);
   }, []);
 
   const isDatabaseReady = useCallback(async (): Promise<boolean> => {
+    // In backend mode the server holds the database — always ready once connected
+    if (serverBaseUrlRef.current) return true;
+
     const api = apiRef.current;
     if (!api) return false;
     try {

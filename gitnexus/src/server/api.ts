@@ -36,6 +36,12 @@ const buildGraph = async (): Promise<{ nodes: GraphNode[]; relationships: GraphR
         query = `MATCH (n:Community) RETURN n.id AS id, n.label AS label, n.heuristicLabel AS heuristicLabel, n.cohesion AS cohesion, n.symbolCount AS symbolCount`;
       } else if (table === 'Process') {
         query = `MATCH (n:Process) RETURN n.id AS id, n.label AS label, n.heuristicLabel AS heuristicLabel, n.processType AS processType, n.stepCount AS stepCount, n.communities AS communities, n.entryPointId AS entryPointId, n.terminalId AS terminalId`;
+      } else if (table === 'Commit') {
+        query = `MATCH (n:Commit) RETURN n.id AS id, n.name AS name, n.filePath AS filePath, n.sha AS sha, n.message AS message, n.authorName AS authorName, n.authorEmail AS authorEmail, n.timestamp AS timestamp, n.filesChanged AS filesChanged`;
+      } else if (table === 'Author') {
+        query = `MATCH (n:Author) RETURN n.id AS id, n.name AS name, n.filePath AS filePath, n.email AS email, n.commitCount AS commitCount`;
+      } else if (table === 'Branch') {
+        query = `MATCH (n:Branch) RETURN n.id AS id, n.name AS name, n.filePath AS filePath, n.isCurrent AS isCurrent`;
       } else {
         query = `MATCH (n:${table}) RETURN n.id AS id, n.name AS name, n.filePath AS filePath, n.startLine AS startLine, n.endLine AS endLine, n.content AS content`;
       }
@@ -59,6 +65,14 @@ const buildGraph = async (): Promise<{ nodes: GraphNode[]; relationships: GraphR
             communities: row.communities,
             entryPointId: row.entryPointId,
             terminalId: row.terminalId,
+            // Git history properties
+            sha: row.sha,
+            message: row.message,
+            email: row.email ?? row.authorEmail,
+            timestamp: row.timestamp,
+            filesChanged: row.filesChanged,
+            isCurrent: row.isCurrent,
+            commitCount: row.commitCount,
           } as GraphNode['properties'],
         });
       }

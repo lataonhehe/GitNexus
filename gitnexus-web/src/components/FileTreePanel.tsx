@@ -14,10 +14,16 @@ import {
   Variable,
   Hash,
   Target,
+  GitCommitHorizontal,
+  GitBranch,
+  User,
 } from 'lucide-react';
 import { useAppState } from '../hooks/useAppState';
 import { FILTERABLE_LABELS, NODE_COLORS, ALL_EDGE_TYPES, EDGE_INFO, type EdgeType } from '../lib/constants';
 import { GraphNode, NodeLabel } from '../core/graph/types';
+
+const GIT_NODE_LABELS: NodeLabel[] = ['Commit', 'Branch', 'Author'];
+const GIT_EDGE_TYPES: EdgeType[] = ['MODIFIED', 'AUTHORED', 'ON_BRANCH'];
 
 // Tree node structure
 interface TreeNode {
@@ -186,6 +192,9 @@ const getNodeTypeIcon = (label: NodeLabel) => {
     case 'Method': return Braces;
     case 'Interface': return Hash;
     case 'Import': return FileCode;
+    case 'Commit': return GitCommitHorizontal;
+    case 'Branch': return GitBranch;
+    case 'Author': return User;
     default: return Variable;
   }
 };
@@ -371,81 +380,103 @@ export const FileTreePanel = ({ onFocusNode }: FileTreePanelProps) => {
 
       {activeTab === 'filters' && (
         <div className="flex-1 overflow-y-auto scrollbar-thin p-3">
+          {/* ── Code Node Types ── */}
           <div className="mb-3">
             <h3 className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">
               Node Types
             </h3>
-            <p className="text-[11px] text-text-muted mb-3">
-              Toggle visibility of node types in the graph
-            </p>
           </div>
 
           <div className="flex flex-col gap-1">
-            {FILTERABLE_LABELS.map((label) => {
+            {FILTERABLE_LABELS.filter(l => !GIT_NODE_LABELS.includes(l as NodeLabel)).map((label) => {
               const Icon = getNodeTypeIcon(label);
               const isVisible = visibleLabels.includes(label);
-
               return (
                 <button
                   key={label}
                   onClick={() => toggleLabelVisibility(label)}
-                  className={`
-                    flex items-center gap-2.5 px-2 py-1.5 rounded text-left transition-colors
-                    ${isVisible
-                      ? 'bg-elevated text-text-primary'
-                      : 'text-text-muted hover:bg-hover hover:text-text-secondary'
-                    }
-                  `}
+                  className={`flex items-center gap-2.5 px-2 py-1.5 rounded text-left transition-colors ${isVisible ? 'bg-elevated text-text-primary' : 'text-text-muted hover:bg-hover hover:text-text-secondary'}`}
                 >
-                  <div
-                    className={`w-5 h-5 rounded flex items-center justify-center ${isVisible ? '' : 'opacity-40'}`}
-                    style={{ backgroundColor: `${NODE_COLORS[label]}20` }}
-                  >
+                  <div className={`w-5 h-5 rounded flex items-center justify-center ${isVisible ? '' : 'opacity-40'}`} style={{ backgroundColor: `${NODE_COLORS[label]}20` }}>
                     <Icon className="w-3 h-3" style={{ color: NODE_COLORS[label] }} />
                   </div>
                   <span className="text-xs flex-1">{label}</span>
-                  <div
-                    className={`w-2 h-2 rounded-full transition-colors ${isVisible ? 'bg-accent' : 'bg-border-subtle'}`}
-                  />
+                  <div className={`w-2 h-2 rounded-full transition-colors ${isVisible ? 'bg-accent' : 'bg-border-subtle'}`} />
                 </button>
               );
             })}
           </div>
 
-          {/* Edge Type Toggles */}
-          <div className="mt-6 pt-4 border-t border-border-subtle">
+          {/* ── Git History Node Types ── */}
+          <div className="mt-5 pt-4 border-t border-border-subtle">
+            <h3 className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2 flex items-center gap-1.5">
+              <GitBranch className="w-3 h-3" />
+              Git History
+            </h3>
+            <div className="flex flex-col gap-1">
+              {GIT_NODE_LABELS.map((label) => {
+                const Icon = getNodeTypeIcon(label);
+                const isVisible = visibleLabels.includes(label);
+                return (
+                  <button
+                    key={label}
+                    onClick={() => toggleLabelVisibility(label)}
+                    className={`flex items-center gap-2.5 px-2 py-1.5 rounded text-left transition-colors ${isVisible ? 'bg-elevated text-text-primary' : 'text-text-muted hover:bg-hover hover:text-text-secondary'}`}
+                  >
+                    <div className={`w-5 h-5 rounded flex items-center justify-center ${isVisible ? '' : 'opacity-40'}`} style={{ backgroundColor: `${NODE_COLORS[label]}20` }}>
+                      <Icon className="w-3 h-3" style={{ color: NODE_COLORS[label] }} />
+                    </div>
+                    <span className="text-xs flex-1">{label}</span>
+                    <div className={`w-2 h-2 rounded-full transition-colors ${isVisible ? 'bg-accent' : 'bg-border-subtle'}`} />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── Code Edge Types ── */}
+          <div className="mt-5 pt-4 border-t border-border-subtle">
             <h3 className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">
               Edge Types
             </h3>
-            <p className="text-[11px] text-text-muted mb-3">
-              Toggle visibility of relationship types
-            </p>
-
             <div className="flex flex-col gap-1">
-              {ALL_EDGE_TYPES.map((edgeType) => {
+              {ALL_EDGE_TYPES.filter(e => !GIT_EDGE_TYPES.includes(e as EdgeType)).map((edgeType) => {
                 const info = EDGE_INFO[edgeType];
                 const isVisible = visibleEdgeTypes.includes(edgeType);
-
                 return (
                   <button
                     key={edgeType}
                     onClick={() => toggleEdgeVisibility(edgeType)}
-                    className={`
-                      flex items-center gap-2.5 px-2 py-1.5 rounded text-left transition-colors
-                      ${isVisible
-                        ? 'bg-elevated text-text-primary'
-                        : 'text-text-muted hover:bg-hover hover:text-text-secondary'
-                      }
-                    `}
+                    className={`flex items-center gap-2.5 px-2 py-1.5 rounded text-left transition-colors ${isVisible ? 'bg-elevated text-text-primary' : 'text-text-muted hover:bg-hover hover:text-text-secondary'}`}
                   >
-                    <div
-                      className={`w-6 h-1.5 rounded-full ${isVisible ? '' : 'opacity-40'}`}
-                      style={{ backgroundColor: info.color }}
-                    />
+                    <div className={`w-6 h-1.5 rounded-full ${isVisible ? '' : 'opacity-40'}`} style={{ backgroundColor: info.color }} />
                     <span className="text-xs flex-1">{info.label}</span>
-                    <div
-                      className={`w-2 h-2 rounded-full transition-colors ${isVisible ? 'bg-accent' : 'bg-border-subtle'}`}
-                    />
+                    <div className={`w-2 h-2 rounded-full transition-colors ${isVisible ? 'bg-accent' : 'bg-border-subtle'}`} />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── Git History Edge Types ── */}
+          <div className="mt-5 pt-4 border-t border-border-subtle">
+            <h3 className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2 flex items-center gap-1.5">
+              <GitBranch className="w-3 h-3" />
+              Git Relationships
+            </h3>
+            <div className="flex flex-col gap-1">
+              {GIT_EDGE_TYPES.map((edgeType) => {
+                const info = EDGE_INFO[edgeType];
+                const isVisible = visibleEdgeTypes.includes(edgeType);
+                return (
+                  <button
+                    key={edgeType}
+                    onClick={() => toggleEdgeVisibility(edgeType)}
+                    className={`flex items-center gap-2.5 px-2 py-1.5 rounded text-left transition-colors ${isVisible ? 'bg-elevated text-text-primary' : 'text-text-muted hover:bg-hover hover:text-text-secondary'}`}
+                  >
+                    <div className={`w-6 h-1.5 rounded-full ${isVisible ? '' : 'opacity-40'}`} style={{ backgroundColor: info.color }} />
+                    <span className="text-xs flex-1">{info.label}</span>
+                    <div className={`w-2 h-2 rounded-full transition-colors ${isVisible ? 'bg-accent' : 'bg-border-subtle'}`} />
                   </button>
                 );
               })}

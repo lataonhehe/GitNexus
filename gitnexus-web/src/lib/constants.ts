@@ -19,6 +19,10 @@ export const NODE_COLORS: Record<NodeLabel, string> = {
   CodeElement: '#64748b', // Slate - muted
   Community: '#818cf8',  // Indigo light - cluster indicator
   Process: '#f43f5e',    // Rose - execution flow indicator
+  // Git history
+  Commit: '#f59e0b',     // Amber - commit snapshot
+  Branch: '#22d3ee',     // Cyan - branch pointer
+  Author: '#a3e635',     // Lime - contributor
 };
 
 // Node sizes by type - clear visual hierarchy with dramatic size differences
@@ -41,6 +45,10 @@ export const NODE_SIZES: Record<NodeLabel, number> = {
   CodeElement: 2,  // Generic small
   Community: 0,    // Hidden by default - metadata node
   Process: 0,      // Hidden by default - metadata node
+  // Git history
+  Commit: 5,
+  Branch: 9,
+  Author: 7,
 };
 
 // Community color palette for cluster-based coloring
@@ -76,6 +84,10 @@ export const DEFAULT_VISIBLE_LABELS: NodeLabel[] = [
   'Interface',
   'Enum',
   'Type',
+  // Git history
+  'Commit',
+  'Branch',
+  'Author',
 ];
 
 // All filterable labels
@@ -88,10 +100,15 @@ export const FILTERABLE_LABELS: NodeLabel[] = [
   'Variable',
   'Interface',
   'Import',
+  // Git history
+  'Commit',
+  'Branch',
+  'Author',
 ];
 
 // Edge/Relation types
-export type EdgeType = 'CONTAINS' | 'DEFINES' | 'IMPORTS' | 'CALLS' | 'EXTENDS' | 'IMPLEMENTS';
+export type EdgeType = 'CONTAINS' | 'DEFINES' | 'IMPORTS' | 'CALLS' | 'EXTENDS' | 'IMPLEMENTS'
+  | 'MODIFIED' | 'AUTHORED' | 'ON_BRANCH';
 
 export const ALL_EDGE_TYPES: EdgeType[] = [
   'CONTAINS',
@@ -100,6 +117,10 @@ export const ALL_EDGE_TYPES: EdgeType[] = [
   'CALLS',
   'EXTENDS',
   'IMPLEMENTS',
+  // Git history
+  'MODIFIED',
+  'AUTHORED',
+  'ON_BRANCH',
 ];
 
 // Default visible edges (CALLS hidden by default to reduce clutter)
@@ -110,6 +131,10 @@ export const DEFAULT_VISIBLE_EDGES: EdgeType[] = [
   'EXTENDS',
   'IMPLEMENTS',
   'CALLS',
+  // Git history
+  'MODIFIED',
+  'AUTHORED',
+  'ON_BRANCH',
 ];
 
 // Edge display info for UI
@@ -120,4 +145,8 @@ export const EDGE_INFO: Record<EdgeType, { color: string; label: string }> = {
   CALLS: { color: '#7c3aed', label: 'Calls' },
   EXTENDS: { color: '#c2410c', label: 'Extends' },
   IMPLEMENTS: { color: '#be185d', label: 'Implements' },
+  // Git history
+  MODIFIED: { color: '#f59e0b', label: 'Modified' },
+  AUTHORED: { color: '#a3e635', label: 'Authored' },
+  ON_BRANCH: { color: '#22d3ee', label: 'On Branch' },
 };

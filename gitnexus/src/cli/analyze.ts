@@ -8,7 +8,7 @@ import path from 'path';
 import { execFileSync } from 'child_process';
 import v8 from 'v8';
 import cliProgress from 'cli-progress';
-import { runPipelineFromRepo } from '../core/ingestion/pipeline.js';
+import { runPipelineFromRepo, PipelineOptions } from '../core/ingestion/pipeline.js';
 import { initLbug, loadGraphToLbug, getLbugStats, executeQuery, executeWithReusedStatement, closeLbug, createFTSIndex, loadCachedEmbeddings } from '../core/lbug/lbug-adapter.js';
 // Embedding imports are lazy (dynamic import) so onnxruntime-node is never
 // loaded when embeddings are not requested. This avoids crashes on Node
@@ -48,12 +48,14 @@ export interface AnalyzeOptions {
   embeddings?: boolean;
   skills?: boolean;
   verbose?: boolean;
+  gitHistory?: boolean;
 }
 
 /** Threshold: auto-skip embeddings for repos with more nodes than this */
 const EMBEDDING_NODE_LIMIT = 50_000;
 
 const PHASE_LABELS: Record<string, string> = {
+  git: 'Ingesting git history',
   extracting: 'Scanning files',
   structure: 'Building structure',
   parsing: 'Parsing code',
@@ -199,11 +201,12 @@ export const analyzeCommand = async (
   }
 
   // ── Phase 1: Full Pipeline (0–60%) ─────────────────────────────────
+  const pipelineOpts: PipelineOptions = { gitHistory: options?.gitHistory };
   const pipelineResult = await runPipelineFromRepo(repoPath, (progress) => {
     const phaseLabel = PHASE_LABELS[progress.phase] || progress.phase;
     const scaled = Math.round(progress.percent * 0.6);
     updateBar(scaled, phaseLabel);
-  });
+  }, pipelineOpts);
 
   // ── Phase 2: LadybugDB (60–85%) ──────────────────────────────────────
   updateBar(60, 'Loading into LadybugDB...');

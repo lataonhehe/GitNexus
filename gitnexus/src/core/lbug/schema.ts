@@ -16,7 +16,9 @@ export const NODE_TABLES = [
   'File', 'Folder', 'Function', 'Class', 'Interface', 'Method', 'CodeElement', 'Community', 'Process',
   // Multi-language support
   'Struct', 'Enum', 'Macro', 'Typedef', 'Union', 'Namespace', 'Trait', 'Impl',
-  'TypeAlias', 'Const', 'Static', 'Property', 'Record', 'Delegate', 'Annotation', 'Constructor', 'Template', 'Module'
+  'TypeAlias', 'Const', 'Static', 'Property', 'Record', 'Delegate', 'Annotation', 'Constructor', 'Template', 'Module',
+  // Git history
+  'Commit', 'Branch', 'Author',
 ] as const;
 export type NodeTableName = typeof NODE_TABLES[number];
 
@@ -26,7 +28,7 @@ export type NodeTableName = typeof NODE_TABLES[number];
 export const REL_TABLE_NAME = 'CodeRelation';
 
 // Valid relation types
-export const REL_TYPES = ['CONTAINS', 'DEFINES', 'IMPORTS', 'CALLS', 'EXTENDS', 'IMPLEMENTS', 'HAS_METHOD', 'OVERRIDES', 'MEMBER_OF', 'STEP_IN_PROCESS'] as const;
+export const REL_TYPES = ['CONTAINS', 'DEFINES', 'IMPORTS', 'CALLS', 'EXTENDS', 'IMPLEMENTS', 'HAS_METHOD', 'OVERRIDES', 'MEMBER_OF', 'STEP_IN_PROCESS', 'AUTHORED', 'MODIFIED', 'ON_BRANCH'] as const;
 export type RelType = typeof REL_TYPES[number];
 
 // ============================================================================
@@ -364,6 +366,9 @@ CREATE REL TABLE ${REL_TABLE_NAME} (
   FROM \`Constructor\` TO \`Typedef\`,
   FROM \`Template\` TO Community,
   FROM \`Module\` TO Community,
+  FROM Author TO Commit,
+  FROM Commit TO File,
+  FROM Branch TO Commit,
   FROM Function TO Process,
   FROM Method TO Process,
   FROM Class TO Process,
@@ -391,6 +396,43 @@ CREATE REL TABLE ${REL_TABLE_NAME} (
   confidence DOUBLE,
   reason STRING,
   step INT32
+)`;
+
+// ============================================================================
+// GIT HISTORY NODE TABLE SCHEMAS
+// ============================================================================
+
+export const COMMIT_SCHEMA = `
+CREATE NODE TABLE Commit (
+  id STRING,
+  name STRING,
+  sha STRING,
+  message STRING,
+  authorName STRING,
+  authorEmail STRING,
+  timestamp INT64,
+  filesChanged INT32,
+  filePath STRING,
+  PRIMARY KEY (id)
+)`;
+
+export const AUTHOR_SCHEMA = `
+CREATE NODE TABLE Author (
+  id STRING,
+  name STRING,
+  email STRING,
+  commitCount INT32,
+  filePath STRING,
+  PRIMARY KEY (id)
+)`;
+
+export const BRANCH_SCHEMA = `
+CREATE NODE TABLE Branch (
+  id STRING,
+  name STRING,
+  isCurrent BOOLEAN,
+  filePath STRING,
+  PRIMARY KEY (id)
 )`;
 
 // ============================================================================
@@ -447,6 +489,10 @@ export const NODE_SCHEMA_QUERIES = [
   CONSTRUCTOR_SCHEMA,
   TEMPLATE_SCHEMA,
   MODULE_SCHEMA,
+  // Git history
+  COMMIT_SCHEMA,
+  AUTHOR_SCHEMA,
+  BRANCH_SCHEMA,
 ];
 
 export const REL_SCHEMA_QUERIES = [
