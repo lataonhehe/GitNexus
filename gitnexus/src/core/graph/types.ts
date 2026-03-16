@@ -98,6 +98,7 @@ export type RelationshipType =
   | 'MODIFIED'
   | 'AUTHORED'
   | 'ON_BRANCH'
+  | 'PRECEDES'
 
 export interface GraphNode {
   id:  string,

@@ -154,6 +154,21 @@ export const processGitNodes = (
       });
     }
 
+    // OlderCommit -[PRECEDES]-> NewerCommit
+    // git log returns commits newest-first, so commits[i+1] is the parent of commits[i]
+    for (let i = commits.length - 1; i > 0; i--) {
+      const olderSha = commits[i].sha;
+      const newerSha = commits[i - 1].sha;
+      graph.addRelationship({
+        id: `${olderSha.substring(0, 8)}_precedes_${newerSha.substring(0, 8)}`,
+        type: 'PRECEDES',
+        sourceId: `Commit:${olderSha}`,
+        targetId: `Commit:${newerSha}`,
+        confidence: 1.0,
+        reason: 'git-log',
+      });
+    }
+
     return { commits };
   } catch {
     // Git history is optional — never fail the pipeline

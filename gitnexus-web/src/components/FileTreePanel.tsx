@@ -23,7 +23,7 @@ import { FILTERABLE_LABELS, NODE_COLORS, ALL_EDGE_TYPES, EDGE_INFO, type EdgeTyp
 import { GraphNode, NodeLabel } from '../core/graph/types';
 
 const GIT_NODE_LABELS: NodeLabel[] = ['Commit', 'Branch', 'Author'];
-const GIT_EDGE_TYPES: EdgeType[] = ['MODIFIED', 'AUTHORED', 'ON_BRANCH'];
+const GIT_EDGE_TYPES: EdgeType[] = ['MODIFIED', 'AUTHORED', 'ON_BRANCH', 'PRECEDES'];
 
 // Tree node structure
 interface TreeNode {

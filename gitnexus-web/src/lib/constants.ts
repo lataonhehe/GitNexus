@@ -108,7 +108,7 @@ export const FILTERABLE_LABELS: NodeLabel[] = [
 
 // Edge/Relation types
 export type EdgeType = 'CONTAINS' | 'DEFINES' | 'IMPORTS' | 'CALLS' | 'EXTENDS' | 'IMPLEMENTS'
-  | 'MODIFIED' | 'AUTHORED' | 'ON_BRANCH';
+  | 'MODIFIED' | 'AUTHORED' | 'ON_BRANCH' | 'PRECEDES';
 
 export const ALL_EDGE_TYPES: EdgeType[] = [
   'CONTAINS',
@@ -121,6 +121,7 @@ export const ALL_EDGE_TYPES: EdgeType[] = [
   'MODIFIED',
   'AUTHORED',
   'ON_BRANCH',
+  'PRECEDES',
 ];
 
 // Default visible edges (CALLS hidden by default to reduce clutter)
@@ -135,6 +136,7 @@ export const DEFAULT_VISIBLE_EDGES: EdgeType[] = [
   'MODIFIED',
   'AUTHORED',
   'ON_BRANCH',
+  'PRECEDES',
 ];
 
 // Edge display info for UI
@@ -149,4 +151,5 @@ export const EDGE_INFO: Record<EdgeType, { color: string; label: string }> = {
   MODIFIED: { color: '#f59e0b', label: 'Modified' },
   AUTHORED: { color: '#a3e635', label: 'Authored' },
   ON_BRANCH: { color: '#22d3ee', label: 'On Branch' },
+  PRECEDES: { color: '#94a3b8', label: 'Precedes' },
 };

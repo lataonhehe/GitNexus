@@ -28,7 +28,7 @@ export type NodeTableName = typeof NODE_TABLES[number];
 export const REL_TABLE_NAME = 'CodeRelation';
 
 // Valid relation types
-export const REL_TYPES = ['CONTAINS', 'DEFINES', 'IMPORTS', 'CALLS', 'EXTENDS', 'IMPLEMENTS', 'HAS_METHOD', 'OVERRIDES', 'MEMBER_OF', 'STEP_IN_PROCESS', 'AUTHORED', 'MODIFIED', 'ON_BRANCH'] as const;
+export const REL_TYPES = ['CONTAINS', 'DEFINES', 'IMPORTS', 'CALLS', 'EXTENDS', 'IMPLEMENTS', 'HAS_METHOD', 'OVERRIDES', 'MEMBER_OF', 'STEP_IN_PROCESS', 'AUTHORED', 'MODIFIED', 'ON_BRANCH', 'PRECEDES'] as const;
 export type RelType = typeof REL_TYPES[number];
 
 // ============================================================================
@@ -368,6 +368,7 @@ CREATE REL TABLE ${REL_TABLE_NAME} (
   FROM \`Module\` TO Community,
   FROM Author TO Commit,
   FROM Commit TO File,
+  FROM Commit TO Commit,
   FROM Branch TO Commit,
   FROM Function TO Process,
   FROM Method TO Process,
