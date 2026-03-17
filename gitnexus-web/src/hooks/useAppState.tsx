@@ -278,6 +278,8 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
 
   // Project info
   const [projectName, setProjectName] = useState<string>('');
+  // Keep ref in sync with projectName for use in runQuery callback
+  useEffect(() => { currentRepoNameRef.current = projectName || null; }, [projectName]);
 
   // Multi-repo switching
   const [serverBaseUrl, setServerBaseUrl] = useState<string | null>(null);
@@ -285,6 +287,10 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
   // Keep ref in sync so runQuery/isDatabaseReady callbacks never go stale
   useEffect(() => { serverBaseUrlRef.current = serverBaseUrl; }, [serverBaseUrl]);
   const [availableRepos, setAvailableRepos] = useState<RepoSummary[]>([]);
+
+  // Track the currently-selected repo name for backend-mode Cypher queries.
+  // Using a ref avoids stale closures inside runQuery without re-creating the callback.
+  const currentRepoNameRef = useRef<string | null>(null);
 
   // Embedding state
   const [embeddingStatus, setEmbeddingStatus] = useState<EmbeddingStatus>('idle');
@@ -475,10 +481,15 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
     if (serverUrl) {
       const { normalizeServerUrl } = await import('../services/server-connection');
       const base = normalizeServerUrl(serverUrl);
+      const body: Record<string, string> = { cypher };
+      // Include the currently-selected repo so the server queries the right DB.
+      // Without this, the server falls back to the first indexed repo regardless of what
+      // the UI is showing.
+      if (currentRepoNameRef.current) body.repo = currentRepoNameRef.current;
       const res = await fetch(`${base}/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cypher }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
