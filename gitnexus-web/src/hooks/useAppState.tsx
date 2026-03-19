@@ -155,7 +155,7 @@ interface AppState {
 
   // LLM methods
   refreshLLMSettings: () => void;
-  initializeAgent: (overrideProjectName?: string) => Promise<void>;
+  initializeAgent: (overrideProjectName?: string, options?: { backendUrl: string; fileContents: Map<string, string> }) => Promise<void>;
   sendChatMessage: (message: string) => Promise<void>;
   stopChatResponse: () => void;
   clearChat: () => void;
@@ -600,7 +600,10 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
     setLLMSettings(loadSettings());
   }, []);
 
-  const initializeAgent = useCallback(async (overrideProjectName?: string): Promise<void> => {
+  const initializeAgent = useCallback(async (
+    overrideProjectName?: string,
+    options?: { backendUrl: string; fileContents: Map<string, string> }
+  ): Promise<void> => {
     const api = apiRef.current;
     if (!api) {
       setAgentError('Worker not initialized');
@@ -617,8 +620,33 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
     setAgentError(null);
 
     try {
-      // Use override if provided (for fresh loads), fallback to state (for re-init)
       const effectiveProjectName = overrideProjectName || projectName || 'project';
+
+      // Backend mode: use HTTP-backed tools (server holds DB, no local embeddings)
+      const backendUrl = options?.backendUrl ?? serverBaseUrlRef.current ?? undefined;
+      const backendFileContents = options?.fileContents ?? fileContents;
+      if (backendUrl && backendFileContents.size > 0) {
+        const result = await api.initializeBackendAgent(
+          config,
+          backendUrl,
+          effectiveProjectName,
+          Array.from(backendFileContents.entries()),
+          effectiveProjectName
+        );
+        if (result.success) {
+          setIsAgentReady(true);
+          setAgentError(null);
+          if (import.meta.env.DEV) {
+            console.log('✅ Backend agent initialized successfully');
+          }
+        } else {
+          setAgentError(result.error ?? 'Failed to initialize backend agent');
+          setIsAgentReady(false);
+        }
+        return;
+      }
+
+      // Local mode: use worker's LadybugDB
       const result = await api.initializeAgent(config, effectiveProjectName);
       if (result.success) {
         setIsAgentReady(true);
@@ -637,7 +665,7 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       setIsAgentInitializing(false);
     }
-  }, [projectName]);
+  }, [projectName, fileContents]);
 
   const sendChatMessage = useCallback(async (message: string): Promise<void> => {
     const api = apiRef.current;
@@ -1054,15 +1082,11 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
 
       setViewMode('exploring');
 
-      if (getActiveProviderConfig()) initializeAgent(pName);
-
-      startEmbeddings().catch((err) => {
-        if (err?.name === 'WebGPUNotAvailableError' || err?.message?.includes('WebGPU')) {
-          startEmbeddings('wasm').catch(console.warn);
-        } else {
-          console.warn('Embeddings auto-start failed:', err);
-        }
-      });
+      // Backend mode: use HTTP-backed agent, skip local embeddings (server has DB + search)
+      if (getActiveProviderConfig()) {
+        initializeAgent(pName, { backendUrl: serverBaseUrl, fileContents: fileMap });
+      }
+      // Do NOT call startEmbeddings in backend mode — worker has no local DB
     } catch (err) {
       console.error('Repo switch failed:', err);
       setProgress({
@@ -1072,7 +1096,7 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
       });
       setTimeout(() => { setViewMode('exploring'); setProgress(null); }, 3000);
     }
-  }, [serverBaseUrl, setProgress, setViewMode, setProjectName, setGraph, setFileContents, initializeAgent, startEmbeddings, setHighlightedNodeIds, clearAIToolHighlights, clearBlastRadius, setSelectedNode, setQueryResult, setCodeReferences, setCodePanelOpen, setCodeReferenceFocus]);
+  }, [serverBaseUrl, setProgress, setViewMode, setProjectName, setGraph, setFileContents, initializeAgent, setHighlightedNodeIds, clearAIToolHighlights, clearBlastRadius, setSelectedNode, setQueryResult, setCodeReferences, setCodePanelOpen, setCodeReferenceFocus]);
 
   const removeCodeReference = useCallback((id: string) => {
     setCodeReferences(prev => {

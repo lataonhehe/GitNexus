@@ -16,6 +16,21 @@ import { z } from 'zod';
 // Note: GRAPH_SCHEMA_DESCRIPTION from './types' is available if needed for additional context
 import { WebGPUNotAvailableError, embedText, embeddingToArray, initEmbedder, isEmbedderReady } from '../embeddings/embedder';
 
+/** Flexible optional number — LLMs often pass "10" instead of 10 */
+const flexNum = () =>
+  z.union([z.number(), z.string()]).optional().nullable().transform((v) => {
+    if (v === undefined || v === null) return undefined;
+    const n = typeof v === 'number' ? v : Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  });
+
+/** Flexible optional boolean — LLMs often pass "true" instead of true */
+const flexBool = () =>
+  z.union([z.boolean(), z.string()]).optional().nullable().transform((v) => {
+    if (v === undefined || v === null) return undefined;
+    return v === true || v === 'true' || v === '1';
+  });
+
 /**
  * Tool factory - creates tools bound to the LadybugDB query functions
  */
@@ -254,8 +269,8 @@ export const createGraphRAGTools = (
       description: 'Search for code by keywords or concepts. Combines keyword matching and semantic understanding. Groups results by process with cluster context.',
       schema: z.object({
         query: z.string().describe('What you are looking for (e.g., "authentication middleware", "database connection")'),
-        groupByProcess: z.boolean().optional().nullable().describe('Group results by process (default: true)'),
-        limit: z.number().optional().nullable().describe('Max results to return (default: 10)'),
+        groupByProcess: flexBool().describe('Group results by process (default: true)'),
+        limit: flexNum().describe('Max results to return (default: 10)'),
       }),
     }
   );
@@ -428,8 +443,8 @@ MATCH (n:Function {id: emb.nodeId}) RETURN n`,
       schema: z.object({
         pattern: z.string().describe('Regex pattern to search for (e.g., "TODO", "console\\.log", "API_KEY")'),
         fileFilter: z.string().optional().nullable().describe('Only search files containing this string (e.g., ".ts", "src/api")'),
-        caseSensitive: z.boolean().optional().nullable().describe('Case-sensitive search (default: false)'),
-        maxResults: z.number().optional().nullable().describe('Max results (default: 100)'),
+        caseSensitive: flexBool().describe('Case-sensitive search (default: false)'),
+        maxResults: flexNum().describe('Max results (default: 100)'),
       }),
     }
   );
@@ -612,7 +627,7 @@ MATCH (n:Function {id: emb.nodeId}) RETURN n`,
     {
       name: 'overview',
       description: 'Codebase map showing all clusters and processes, plus cross-cluster dependencies.',
-      schema: z.object({}),
+      schema: z.object({}).passthrough(),
     }
   );
 
@@ -864,7 +879,11 @@ MATCH (n:Function {id: emb.nodeId}) RETURN n`,
       description: 'Deep dive on a symbol, cluster, or process. Shows membership, participation, and connections.',
       schema: z.object({
         target: z.string().describe('Name or ID of a symbol, cluster, or process'),
-        type: z.enum(['symbol', 'cluster', 'process']).optional().nullable().describe('Optional target type (auto-detected if omitted)'),
+        type: z.union([z.enum(['symbol', 'cluster', 'process']), z.string()]).optional().nullable().transform((v) => {
+          if (v == null) return undefined;
+          const s = String(v).toLowerCase();
+          return ['symbol', 'cluster', 'process'].includes(s) ? s : undefined;
+        }).describe('Optional target type (auto-detected if omitted)'),
       }),
     }
   );
@@ -1478,11 +1497,17 @@ Additional output sections:
 - Risk summary (based on direct callers, processes, clusters)`,
       schema: z.object({
         target: z.string().describe('Name of the function, class, or file to analyze'),
-        direction: z.enum(['upstream', 'downstream']).describe('upstream = what depends on this; downstream = what this depends on'),
-        maxDepth: z.number().optional().nullable().describe('Max traversal depth (default: 3, max: 10)'),
-        relationTypes: z.array(z.string()).optional().nullable().describe('Filter by relation types: CALLS, IMPORTS, EXTENDS, IMPLEMENTS, CONTAINS, DEFINES (default: usage-based)'),
-        includeTests: z.boolean().optional().nullable().describe('Include test files in results (default: false, excludes .test.ts, .spec.ts, __tests__)'),
-        minConfidence: z.number().optional().nullable().describe('Minimum edge confidence 0-1 (default: 0.7, excludes fuzzy/inferred matches)'),
+        direction: z.union([z.enum(['upstream', 'downstream']), z.string()]).transform((v) => {
+          const s = String(v).toLowerCase();
+          return s === 'downstream' ? 'downstream' : 'upstream';
+        }).describe('upstream = what depends on this; downstream = what this depends on'),
+        maxDepth: flexNum().describe('Max traversal depth (default: 3, max: 10)'),
+        relationTypes: z.union([z.array(z.string()), z.string()]).optional().nullable().transform((v) => {
+          if (v == null) return undefined;
+          return Array.isArray(v) ? v : (v ? [String(v)] : []);
+        }).describe('Filter by relation types: CALLS, IMPORTS, EXTENDS, IMPLEMENTS, CONTAINS, DEFINES (default: usage-based)'),
+        includeTests: flexBool().describe('Include test files in results (default: false, excludes .test.ts, .spec.ts, __tests__)'),
+        minConfidence: flexNum().describe('Minimum edge confidence 0-1 (default: 0.7, excludes fuzzy/inferred matches)'),
       }),
     }
   );

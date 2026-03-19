@@ -132,10 +132,12 @@ const AppContent = () => {
     }
   }, [setViewMode, setGraph, setFileContents, setProgress, setProjectName, runPipelineFromFiles, startEmbeddings, initializeAgent]);
 
-  const handleServerConnect = useCallback((result: ConnectToServerResult) => {
-    // Extract project name from repoPath
-    const repoPath = result.repoInfo.repoPath;
-    const projectName = repoPath.split('/').pop() || 'server-project';
+  const handleServerConnect = useCallback((
+    result: ConnectToServerResult,
+    baseUrl?: string
+  ) => {
+    // Use repo name from server; fallback to basename of path (handles Windows \)
+    const projectName = result.repoInfo.name || result.repoInfo.repoPath.replace(/\\/g, '/').split('/').pop() || 'server-project';
     setProjectName(projectName);
 
     // Build KnowledgeGraph from server data (bypasses WASM pipeline entirely)
@@ -158,20 +160,12 @@ const AppContent = () => {
     // Transition directly to exploring view
     setViewMode('exploring');
 
-    // Initialize agent if LLM is configured
-    if (getActiveProviderConfig()) {
-      initializeAgent(projectName);
+    // Backend mode: use HTTP-backed agent, skip local embeddings (server has DB + search)
+    if (getActiveProviderConfig() && baseUrl) {
+      initializeAgent(projectName, { backendUrl: baseUrl, fileContents: fileMap });
     }
-
-    // Auto-start embeddings
-    startEmbeddings().catch((err) => {
-      if (err?.name === 'WebGPUNotAvailableError' || err?.message?.includes('WebGPU')) {
-        startEmbeddings('wasm').catch(console.warn);
-      } else {
-        console.warn('Embeddings auto-start failed:', err);
-      }
-    });
-  }, [setViewMode, setGraph, setFileContents, setProjectName, initializeAgent, startEmbeddings]);
+    // Do NOT call startEmbeddings in backend mode — worker has no local DB
+  }, [setViewMode, setGraph, setFileContents, setProjectName, initializeAgent]);
 
   // Auto-connect when ?server query param is present (bookmarkable shortcut)
   const autoConnectRan = useRef(false);
@@ -203,7 +197,7 @@ const AppContent = () => {
         setProgress({ phase: 'extracting', percent: 97, message: 'Processing...', detail: 'Extracting file contents' });
       }
     }).then(async (result) => {
-      handleServerConnect(result);
+      handleServerConnect(result, baseUrl);
 
       // Store server URL and fetch available repos for the repo switcher
       setServerBaseUrl(baseUrl);
@@ -246,9 +240,9 @@ const AppContent = () => {
         onFileSelect={handleFileSelect}
         onGitClone={handleGitClone}
         onServerConnect={async (result, serverUrl) => {
-          handleServerConnect(result);
-          if (serverUrl) {
-            const baseUrl = normalizeServerUrl(serverUrl);
+          const baseUrl = serverUrl ? normalizeServerUrl(serverUrl) : undefined;
+          handleServerConnect(result, baseUrl);
+          if (baseUrl) {
             setServerBaseUrl(baseUrl);
             try {
               const repos = await fetchRepos(baseUrl);

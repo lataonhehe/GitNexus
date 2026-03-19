@@ -350,10 +350,14 @@ function countItems(tree: Map<string, any>): number {
 
 /**
  * Build complete codebase context
+ * @param executeQuery - Cypher executor (local or HTTP)
+ * @param projectName - Display name (use short name, not full path)
+ * @param fileContentsFallback - Optional; when Cypher returns 0, use this for file count
  */
 export async function buildCodebaseContext(
   executeQuery: (cypher: string) => Promise<any[]>,
-  projectName: string
+  projectName: string,
+  fileContentsFallback?: Map<string, string>
 ): Promise<CodebaseContext> {
   // Run all queries in parallel for speed
   const [stats, hotspots, folderTree] = await Promise.all([
@@ -362,8 +366,14 @@ export async function buildCodebaseContext(
     getFolderTree(executeQuery),
   ]);
 
+  // Fallback: when Cypher returns 0 but we have file contents (e.g. backend mode)
+  const fileCount = stats.fileCount > 0 ? stats.fileCount : (fileContentsFallback?.size ?? 0);
+  const effectiveStats = fileCount > 0
+    ? { ...stats, fileCount }
+    : stats;
+
   return {
-    stats,
+    stats: effectiveStats,
     hotspots,
     folderTree,
   };
@@ -372,13 +382,21 @@ export async function buildCodebaseContext(
 /**
  * Format context as markdown for prompt injection
  */
+/** Short display name (handles Windows paths like C:\Users\...\gitnexus) */
+function shortProjectName(name: string): string {
+  const normalized = name.replace(/\\/g, '/');
+  const parts = normalized.split('/').filter(Boolean);
+  return parts[parts.length - 1] || name;
+}
+
 export function formatContextForPrompt(context: CodebaseContext): string {
   const { stats, hotspots, folderTree } = context;
   
   const lines: string[] = [];
+  const displayName = shortProjectName(stats.projectName);
   
   // Project header with stats
-  lines.push(`### 📊 CODEBASE: ${stats.projectName}`);
+  lines.push(`### 📊 CODEBASE: ${displayName}`);
   
   const statParts = [
     `Files: ${stats.fileCount}`,
@@ -402,7 +420,7 @@ export function formatContextForPrompt(context: CodebaseContext): string {
   if (folderTree) {
     lines.push('### 📁 STRUCTURE');
     lines.push('```');
-    lines.push(stats.projectName + '/');
+    lines.push(displayName + '/');
     lines.push(folderTree);
     lines.push('```');
   }

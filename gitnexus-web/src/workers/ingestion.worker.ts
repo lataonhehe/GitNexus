@@ -74,7 +74,8 @@ const httpFetchWithTimeout = async (
 
 const createHttpExecuteQuery = (backendUrl: string, repo: string) => {
   return async (cypher: string): Promise<any[]> => {
-    const response = await httpFetchWithTimeout(`${backendUrl}/api/query`, {
+    // backendUrl already ends with /api (from normalizeServerUrl)
+    const response = await httpFetchWithTimeout(`${backendUrl}/query`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cypher, repo }),
@@ -97,7 +98,8 @@ const createHttpExecuteQuery = (backendUrl: string, repo: string) => {
 const createHttpHybridSearch = (backendUrl: string, repo: string) => {
   return async (query: string, k: number = 15): Promise<any[]> => {
     try {
-      const response = await httpFetchWithTimeout(`${backendUrl}/api/search`, {
+      // backendUrl already ends with /api (from normalizeServerUrl)
+      const response = await httpFetchWithTimeout(`${backendUrl}/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query, limit: k, repo }),
@@ -651,9 +653,10 @@ const workerApi = {
       const hybridSearch = createHttpHybridSearch(backendUrl, repoName);
 
       // Build codebase context (uses Cypher queries — works via HTTP)
+      // Pass contents as fallback when Cypher returns 0 (e.g. backend result format differs)
       let codebaseContext: CodebaseContext | undefined;
       try {
-        codebaseContext = await buildCodebaseContext(executeQuery, projectName || repoName);
+        codebaseContext = await buildCodebaseContext(executeQuery, projectName || repoName, contents);
       } catch {
         // Non-fatal — agent works without context
       }
