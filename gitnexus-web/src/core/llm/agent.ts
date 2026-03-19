@@ -26,7 +26,31 @@ import type {
 import { 
   type CodebaseContext,
   buildDynamicSystemPrompt,
+  formatContextForPrompt,
 } from './context-builder';
+
+/** Extract plain text from message content (string, array of blocks, single object, or other formats) */
+function extractTextFromContent(c: unknown): string {
+  if (c == null) return '';
+  if (typeof c === 'string') return c;
+  if (Array.isArray(c)) {
+    let text = '';
+    for (const b of c as any[]) {
+      if (typeof b === 'string') text += b;
+      else if (b?.type === 'text' && b?.text) text += b.text;
+      else if (b?.text) text += b.text;
+      else if (b?.type === 'content_block' && b?.text) text += b.text;
+      else if (b?.type === 'input_text' && b?.text) text += b.text;
+    }
+    return text;
+  }
+  // Single object: { type: 'text', text: '...' } or { text: '...' }
+  if (typeof c === 'object' && c !== null) {
+    const o = c as any;
+    if (o.text && typeof o.text === 'string') return o.text;
+  }
+  return '';
+}
 
 /**
  * System prompt for the Graph RAG agent
@@ -48,81 +72,27 @@ import {
  * 4. Output format & rules
  * 5. [Dynamic context appended at end]
  */
-export const BASE_SYSTEM_PROMPT = `You are Nexus, a Code Analysis Agent with access to a Knowledge Graph. Your responses MUST be grounded.
+export const BASE_SYSTEM_PROMPT = `You are Nexus, a Code Analysis Agent with Knowledge Graph access. Ground every claim.
 
-## ⚠️ MANDATORY: GROUNDING
-Every factual claim MUST include a citation.
-- File refs: [[src/auth.ts:45-60]] (line range with hyphen)
-- NO citation = NO claim. Say "I didn't find evidence" instead of guessing.
+## RULES
+- **Cite or retract.** Use [[file:line]] or [[Type:Name]]. No citation = say "I didn't find evidence."
+- **Validate with cypher** before final output. Don't trust readme alone.
+- **Read before concluding.** Don't guess from names.
+- **impact output is trusted** — no re-validation needed.
 
-## ⚠️ MANDATORY: VALIDATION
-Every output MUST be validated.
-- Use cypher to validate the results and confirm completeness of context before final output.
-- NO validation = NO claim. Say "I didn't find evidence" instead of guessing.
-- Do not blindly trust readme or single source of truth. Always validate and cross-reference. Never be lazy.
+## PROTOCOL
+Search (cypher/search/grep) → Read → Trace → Cite → Validate.
 
-## 🧠 CORE PROTOCOL
-You are an investigator. For each question:
-1. **Search** → Use cypher, search or grep to find relevant code
-2. **Read** → Use read to see the actual source
-3. **Trace** → Use cypher to follow connections in the graph
-4. **Cite** → Ground every finding with [[file:line]] or [[Type:Name]]
-5. **Validate** → Use cypher to validate the results and confirm completeness of context before final output. ( MUST DO )
+## TOOLS
+\`search\` hybrid | \`cypher\` graph (use {{QUERY_VECTOR}}) | \`grep\` regex | \`read\` file | \`explore\` symbol/cluster | \`overview\` map | \`impact\` blast radius
 
-## 🛠️ TOOLS
-- **\`search\`** — Hybrid search. Results grouped by process with cluster context.
-- **\`cypher\`** — Cypher queries against the graph. Use \`{{QUERY_VECTOR}}\` for vector search.
-- **\`grep\`** — Regex search. Best for exact strings, TODOs, error codes.
-- **\`read\`** — Read file content. Always use after search/grep to see full code.
-- **\`explore\`** — Deep dive on a symbol, cluster, or process. Shows membership, participation, connections.
-- **\`overview\`** — Codebase map showing all clusters and processes.
-- **\`impact\`** — Impact analysis. Shows affected processes, clusters, and risk level.
+## GRAPH
+Nodes: File, Function, Class, Method, Community, Process, Commit. Relations: CONTAINS, DEFINES, IMPORTS, CALLS, EXTENDS, IMPLEMENTS, HAS_METHOD, MEMBER_OF, STEP_IN_PROCESS. Node ID: \`Label:filePath:name\`.
 
-## 📊 GRAPH SCHEMA
-Nodes: File, Folder, Function, Class, Interface, Method, Community, Process
-Relations: \`CodeRelation\` with \`type\` property: CONTAINS, DEFINES, IMPORTS, CALLS, EXTENDS, IMPLEMENTS, MEMBER_OF, STEP_IN_PROCESS
+Cypher: \`MATCH (f:File)-[:CodeRelation {type:'IMPORTS'}]->(g) RETURN f.name,g.name\`
 
-## 📐 GRAPH SEMANTICS (Important!)
-**Edge Types:**
-- \`CALLS\`: Method invocation OR constructor injection. If A receives B as parameter and uses it, A→B is CALLS. This is intentional simplification.
-- \`IMPORTS\`: File-level import/include statement.
-- \`EXTENDS/IMPLEMENTS\`: Class inheritance.
-
-**Process Nodes:**
-- Process labels use format: "EntryPoint → Terminal" (e.g., "onCreate → showToast")
-- These are heuristic names from tracing execution flow, NOT application-defined names
-- Entry points are detected via export status, naming patterns, and framework conventions
-
-Cypher examples:
-- \`MATCH (f:Function) RETURN f.name LIMIT 10\`
-- \`MATCH (f:File)-[:CodeRelation {type: 'IMPORTS'}]->(g:File) RETURN f.name, g.name\`
-
-## 📝CRITICAL RULES
-- **impact output is trusted.** Do NOT re-validate with cypher. Optionally run the suggested grep commands for dynamic patterns.
-- **Cite or retract.** Never state something you can't ground.
-- **Read before concluding.** Don't guess from names alone.
-- **Retry on failure.** If a tool fails, fix the input and try again.
-- **Cyfer tool validation** prefer using cyfer tool in anything that requires graph connections.
-- **OUTPUT STYLE** Prefer using tables and mermaid diagrams instead of long explanations.
-- ALWAYS USE MERMAID FOR VISUALIZATION AND STRUCTURING THE OUTPUT.
-
-## 🎯 OUTPUT STYLE
-Think like a senior architect. Be concise—no fluff, short, precise and to the point.
-- Use tables for comparisons/rankings
-- Use mermaid diagrams for flows/dependencies
-- Surface deep insights: patterns, coupling, design decisions
-- End with **TL;DR** (short summary of the response, summing up the response and the most critical parts)
-
-## MERMAID RULES
-When generating diagrams:
-- NO special characters in node labels: quotes, (), /, &, <, >
-- Wrap labels with spaces in quotes: A["My Label"]
-- Use simple IDs: A, B, C or auth, db, api
-- Flowchart: graph TD or graph LR (not flowchart)
-- Always test mentally: would this parse?
-
-BAD:  A[User's Data] --> B(Process & Save)
-GOOD: A["User Data"] --> B["Process and Save"]
+## OUTPUT
+Tables + mermaid. TL;DR at end. Mermaid: no special chars in labels; wrap spaces: A["My Label"].
 `;
 export const createChatModel = (config: ProviderConfig): BaseChatModel => {
   switch (config.provider) {
@@ -281,9 +251,10 @@ export const createGraphRAGAgent = (
     ? buildDynamicSystemPrompt(BASE_SYSTEM_PROMPT, codebaseContext)
     : BASE_SYSTEM_PROMPT;
   
-  // Log the full prompt for debugging
-  if (import.meta.env.DEV) {
-    console.log('🤖 AGENT SYSTEM PROMPT:\n', systemPrompt);
+  // Log prompt summary (full prompt can be very long)
+  if (DEV) {
+    const ctxLen = codebaseContext ? formatContextForPrompt(codebaseContext).length : 0;
+    console.log(`🤖 [agent] created | prompt: ${systemPrompt.length} chars | context: ${ctxLen} chars`);
   }
   
   const agent = createReactAgent({
@@ -304,223 +275,90 @@ export interface AgentMessage {
 }
 
 /**
- * Stream a response from the agent
- * Uses BOTH streamModes for best of both worlds:
- * - 'values' for state transitions (tool calls, results) in proper order
- * - 'messages' for token-by-token text streaming
- * 
- * This preserves the natural progression: reasoning → tool → reasoning → tool → answer
+ * Non-streaming agent response: uses invoke instead of stream.
+ * Yields tool_call, tool_result, content in order from the parsed result.
+ * Fixes providers (e.g. OpenRouter) that don't stream final response correctly.
  */
+const DEV = import.meta.env.DEV;
+
 export async function* streamAgentResponse(
   agent: ReturnType<typeof createReactAgent>,
   messages: AgentMessage[]
 ): AsyncGenerator<AgentStreamChunk> {
   try {
+    if (DEV) {
+      const lastUser = messages.filter(m => m.role === 'user').pop();
+      console.log(`💬 [invoke] start | messages: ${messages.length} | last: "${(lastUser?.content ?? '').slice(0, 80)}…"`);
+    }
     const formattedMessages = messages.map(m => ({
       role: m.role,
       content: m.content,
     }));
-    
-    // Use BOTH modes: 'values' for structure, 'messages' for token streaming
-    const stream = await agent.stream(
+
+    const result = await agent.invoke(
       { messages: formattedMessages },
-      {
-        streamMode: ['values', 'messages'] as any,
-        // Allow longer tool/reasoning loops (more Cursor-like persistence)
-        recursionLimit: 50,
-      } as any
+      { recursionLimit: 50 }
     );
-    
-    // Track what we've yielded to avoid duplicates
-    const yieldedToolCalls = new Set<string>();
-    const yieldedToolResults = new Set<string>();
-    let lastProcessedMsgCount = formattedMessages.length;
-    // Track if all tools are done (for distinguishing reasoning vs final content)
-    let allToolsDone = true;
-    // Track if we've seen any tool calls in this response turn.
-    // Anything before the first tool call should be treated as "reasoning/narration"
-    // so the UI can show the Cursor-like loop: plan → tool → update → tool → answer.
-    let hasSeenToolCallThisTurn = false;
-    
-    for await (const event of stream) {
-      // Events come as [streamMode, data] tuples when using multiple modes
-      // or just data when using single mode
-      let mode: string;
-      let data: any;
-      
-      if (Array.isArray(event) && event.length === 2 && typeof event[0] === 'string') {
-        [mode, data] = event;
-      } else if (Array.isArray(event) && event[0]?._getType) {
-        // Single messages mode format: [message, metadata]
-        mode = 'messages';
-        data = event;
-      } else {
-        // Assume values mode
-        mode = 'values';
-        data = event;
-      }
-      
-      // DEBUG: Enhanced logging
-      if (import.meta.env.DEV) {
-        const msgType = mode === 'messages' && data?.[0]?._getType?.() || 'n/a';
-        const hasContent = mode === 'messages' && data?.[0]?.content;
-        const hasToolCalls = mode === 'messages' && data?.[0]?.tool_calls?.length > 0;
-        console.log(`🔄 [${mode}] type:${msgType} content:${!!hasContent} tools:${hasToolCalls}`);
-      }
-      // Handle 'messages' mode - token-by-token streaming
-      if (mode === 'messages') {
-        const [msg] = Array.isArray(data) ? data : [data];
-        if (!msg) continue;
-        
-        const msgType = msg._getType?.() || msg.type || msg.constructor?.name || 'unknown';
-        
-        // AIMessageChunk - streaming text tokens
-        if (msgType === 'ai' || msgType === 'AIMessage' || msgType === 'AIMessageChunk') {
-          const rawContent = msg.content;
-          const toolCalls = msg.tool_calls || [];
-          
-          // Handle content that can be string or array of content blocks
-          let content: string = '';
-          if (typeof rawContent === 'string') {
-            content = rawContent;
-          } else if (Array.isArray(rawContent)) {
-            // Content blocks format: [{type: 'text', text: '...'}, ...]
-            content = rawContent
-              .filter((block: any) => block.type === 'text' || typeof block === 'string')
-              .map((block: any) => typeof block === 'string' ? block : block.text || '')
-              .join('');
-          }
-          
-          // If chunk has content, stream it
-          if (content && content.length > 0) {
-            // Determine if this is reasoning/narration vs final answer content.
-            // - Before the first tool call: treat as reasoning (narration)
-            // - Between tool calls/results: treat as reasoning
-            // - After all tools are done: treat as final content
-            const isReasoning =
-              !hasSeenToolCallThisTurn ||
-              toolCalls.length > 0 ||
-              !allToolsDone;
-            yield {
-              type: isReasoning ? 'reasoning' : 'content',
-              [isReasoning ? 'reasoning' : 'content']: content,
-            };
-          }
-          
-          // Track tool calls from message chunks
-          if (toolCalls.length > 0) {
-            hasSeenToolCallThisTurn = true;
-            allToolsDone = false;
-            for (const tc of toolCalls) {
-              const toolId = tc.id || `tool-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-              if (!yieldedToolCalls.has(toolId)) {
-                yieldedToolCalls.add(toolId);
-                yield {
-                  type: 'tool_call',
-                  toolCall: {
-                    id: toolId,
-                    name: tc.name || tc.function?.name || 'unknown',
-                    args: tc.args || (tc.function?.arguments ? JSON.parse(tc.function.arguments) : {}),
-                    status: 'running',
-                  },
-                };
-              }
+
+    const allMessages = result?.messages ?? [];
+    const initialCount = formattedMessages.length;
+
+    for (let i = initialCount; i < allMessages.length; i++) {
+      const msg = allMessages[i];
+      const msgType = msg._getType?.() || msg.type || msg.constructor?.name || '';
+
+      if (msgType === 'ai' || msgType === 'AIMessage') {
+        const toolCalls = msg.tool_calls || [];
+        for (const tc of toolCalls) {
+          const toolId = tc.id || `tool-${Date.now()}-${i}`;
+          let args: Record<string, unknown> = tc.args || {};
+          if (Object.keys(args).length === 0 && typeof tc.function?.arguments === 'string') {
+            try {
+              const parsed = JSON.parse(tc.function.arguments);
+              if (parsed && typeof parsed === 'object') args = parsed;
+            } catch { /* ignore */ }
             }
-          }
+          if (DEV) console.log(`🔧 [llm] tool_call: ${tc.name || 'unknown'}`, Object.keys(args).length ? args : '(no args)');
+          yield {
+            type: 'tool_call',
+            toolCall: {
+              id: toolId,
+              name: tc.name || tc.function?.name || 'unknown',
+              args,
+              status: 'running',
+            },
+          };
         }
-        
-        // ToolMessage in messages mode
-        if (msgType === 'tool' || msgType === 'ToolMessage') {
-          const toolCallId = msg.tool_call_id || '';
-          if (toolCallId && !yieldedToolResults.has(toolCallId)) {
-            yieldedToolResults.add(toolCallId);
-            const result = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-            yield {
-              type: 'tool_result',
-              toolCall: {
-                id: toolCallId,
-                name: msg.name || 'tool',
-                args: {},
-                result: result,
-                status: 'completed',
-              },
-            };
-            // After tool result, next AI content could be reasoning or final
-            allToolsDone = true;
-          }
+
+        const content = extractTextFromContent(msg.content) || extractTextFromContent(msg.additional_kwargs?.content);
+        if (content && !(msg.tool_calls?.length)) {
+          if (DEV) console.log(`📝 [llm] final response: ${content.length} chars`);
+          yield { type: 'content', content };
         }
       }
-      
-      // Handle 'values' mode - state snapshots for structure
-      if (mode === 'values' && data?.messages) {
-        const stepMessages = data.messages || [];
-        
-        // Process new messages for tool calls/results we might have missed
-        for (let i = lastProcessedMsgCount; i < stepMessages.length; i++) {
-          const msg = stepMessages[i];
-          const msgType = msg._getType?.() || msg.type || 'unknown';
-          
-          // Catch tool calls from values mode (backup)
-          if ((msgType === 'ai' || msgType === 'AIMessage') && !yieldedToolCalls.size) {
-            const toolCalls = msg.tool_calls || [];
-            for (const tc of toolCalls) {
-              const toolId = tc.id || `tool-${Date.now()}`;
-              if (!yieldedToolCalls.has(toolId)) {
-                allToolsDone = false;
-                yieldedToolCalls.add(toolId);
-                yield {
-                  type: 'tool_call',
-                  toolCall: {
-                    id: toolId,
-                    name: tc.name || 'unknown',
-                    args: tc.args || {},
-                    status: 'running',
-                  },
-                };
-              }
-            }
-          }
-          
-          // Catch tool results from values mode (backup)
-          if (msgType === 'tool' || msgType === 'ToolMessage') {
-            const toolCallId = msg.tool_call_id || '';
-            if (toolCallId && !yieldedToolResults.has(toolCallId)) {
-              yieldedToolResults.add(toolCallId);
-              const result = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-              yield {
-                type: 'tool_result',
-                toolCall: {
-                  id: toolCallId,
-                  name: msg.name || 'tool',
-                  args: {},
-                  result: result,
-                  status: 'completed',
-                },
-              };
-              allToolsDone = true;
-            }
-          }
-        }
-        
-        lastProcessedMsgCount = stepMessages.length;
+
+      if (msgType === 'tool' || msgType === 'ToolMessage') {
+        const toolCallId = msg.tool_call_id || '';
+        const resultStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+        if (DEV) console.log(`🔧 [llm] tool_result: ${msg.name || 'tool'} → ${resultStr.length} chars`);
+        yield {
+          type: 'tool_result',
+          toolCall: {
+            id: toolCallId,
+            name: msg.name || 'tool',
+            args: {},
+            result: resultStr,
+            status: 'completed',
+          },
+        };
       }
     }
-    
-    // DEBUG: Stream completed normally
-    if (import.meta.env.DEV) {
-      console.log('✅ Stream completed normally, yielding done');
-    }
+
     yield { type: 'done' };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    // DEBUG: Stream error
-    if (import.meta.env.DEV) {
-      console.error('❌ Stream error:', message, error);
-    }
-    yield { 
-      type: 'error', 
-      error: message,
-    };
+    if (DEV) console.error('❌ Invoke error:', message, error);
+    yield { type: 'error', error: message };
   }
 }
 

@@ -720,6 +720,10 @@ const workerApi = {
     messages: AgentMessage[],
     onChunk: (chunk: AgentStreamChunk) => void
   ): Promise<void> {
+    if (import.meta.env.DEV) {
+      const lastUser = messages.filter((m: any) => m.role === 'user').pop();
+      console.log(`💬 [worker] chatStream | messages: ${messages.length} | user: "${(lastUser?.content ?? '').slice(0, 60)}…"`);
+    }
     if (!currentAgent) {
       onChunk({ type: 'error', error: 'Agent not initialized. Please configure an LLM provider first.' });
       return;

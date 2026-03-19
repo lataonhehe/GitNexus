@@ -16,6 +16,26 @@ import { z } from 'zod';
 // Note: GRAPH_SCHEMA_DESCRIPTION from './types' is available if needed for additional context
 import { WebGPUNotAvailableError, embedText, embeddingToArray, initEmbedder, isEmbedderReady } from '../embeddings/embedder';
 
+const DEV = import.meta.env.DEV;
+/** Log tool invocation (DEV only). Truncates long values. */
+const logTool = (name: string, args: Record<string, unknown>) => {
+  if (!DEV) return;
+  const safe: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args)) {
+    if (v === undefined || v === null) continue;
+    if (typeof v === 'string' && v.length > 120) safe[k] = v.slice(0, 120) + '…';
+    else if (typeof v === 'object' && !Array.isArray(v) && Object.keys(v as object).length > 3) safe[k] = '[object]';
+    else safe[k] = v;
+  }
+  console.log(`🔧 [${name}]`, safe);
+};
+/** Log tool result size (DEV only) */
+const logToolResult = (name: string, result: string | unknown) => {
+  if (!DEV) return;
+  const len = typeof result === 'string' ? result.length : JSON.stringify(result).length;
+  console.log(`🔧 [${name}] → ${len} chars`);
+};
+
 /** Flexible optional number — LLMs often pass "10" instead of 10 */
 const flexNum = () =>
   z.union([z.number(), z.string()]).optional().nullable().transform((v) => {
@@ -53,6 +73,7 @@ export const createGraphRAGTools = (
    */
   const searchTool = tool(
     async ({ query, limit, groupByProcess }: { query: string; limit?: number; groupByProcess?: boolean }) => {
+      logTool('search', { query, limit, groupByProcess });
       const k = limit ?? 10;
       const shouldGroup = groupByProcess ?? true;
       
@@ -215,7 +236,9 @@ export const createGraphRAGTools = (
       };
       
       if (!shouldGroup) {
-        return `Found ${searchResults.length} matches:\n\n${results.map(r => formatResult(r)).join('\n\n')}`;
+        const out = `Found ${searchResults.length} matches:\n\n${results.map(r => formatResult(r)).join('\n\n')}`;
+        logToolResult('search', out);
+        return out;
       }
       
       // Group by process (or "No process")
@@ -262,7 +285,9 @@ export const createGraphRAGTools = (
         lines.push('');
       }
       
-      return lines.join('\n').trim();
+      const out = lines.join('\n').trim();
+      logToolResult('search', out);
+      return out;
     },
     {
       name: 'search',
@@ -284,6 +309,7 @@ export const createGraphRAGTools = (
    */
   const cypherTool = tool(
     async ({ query, cypher }: { query?: string; cypher: string }) => {
+      logTool('cypher', { query: query?.slice(0, 80), cypher: cypher.slice(0, 150) + (cypher.length > 150 ? '…' : '') });
       try {
         let finalCypher = cypher;
         
@@ -326,6 +352,7 @@ export const createGraphRAGTools = (
         
         // Format as markdown table (more token efficient than JSON per row)
         if (columnNames.length > 0) {
+          logToolResult('cypher', `${results.length} rows`);
           const header = `| ${columnNames.join(' | ')} |`;
           const separator = `|${columnNames.map(() => '---').join('|')}|`;
           
@@ -353,25 +380,26 @@ export const createGraphRAGTools = (
         return `${results.length} results:\n${formatted.join('\n')}${truncated}`;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        return `Cypher error: ${message}\n\nCheck your query syntax. Node tables: File, Folder, Function, Class, Interface, Method, CodeElement. Relation: CodeRelation with type property (CONTAINS, DEFINES, IMPORTS, CALLS). Example: MATCH (f:File)-[:CodeRelation {type: 'IMPORTS'}]->(g:File) RETURN f, g`;
+        return `Cypher error: ${message}\n\nNode tables: File, Folder, Function, Class, Interface, Method, CodeElement, Community, Process, Struct, Enum, Commit, Branch, Author. Relation: CodeRelation with type (CONTAINS, DEFINES, IMPORTS, CALLS, EXTENDS, IMPLEMENTS, HAS_METHOD, OVERRIDES, MEMBER_OF, STEP_IN_PROCESS, AUTHORED, MODIFIED, ON_BRANCH, PRECEDES). Example: MATCH (f:File)-[:CodeRelation {type: 'IMPORTS'}]->(g:File) RETURN f, g`;
       }
     },
     {
       name: 'cypher',
-      description: `Execute a Cypher query against the code graph. Use for structural queries like finding callers, tracing imports, class inheritance, or custom traversals.
+      description: `Execute a Cypher query against the code graph. Use for structural queries, call tracing, imports, inheritance, or git history.
 
-Node tables: File, Folder, Function, Class, Interface, Method, CodeElement
-Relation: CodeRelation (single table with 'type' property: CONTAINS, DEFINES, IMPORTS, CALLS, EXTENDS, IMPLEMENTS)
+**Nodes:** File, Folder, Function, Class, Interface, Method, CodeElement, Community, Process | Multi-lang: Struct, Enum, Macro, etc. | Git: Commit, Branch, Author
 
-Example queries:
-- Functions calling a function: MATCH (caller:Function)-[:CodeRelation {type: 'CALLS'}]->(fn:Function {name: 'validate'}) RETURN caller.name, caller.filePath
-- Class inheritance: MATCH (child:Class)-[:CodeRelation {type: 'EXTENDS'}]->(parent:Class) RETURN child.name, parent.name
-- Classes implementing interface: MATCH (c:Class)-[:CodeRelation {type: 'IMPLEMENTS'}]->(i:Interface) RETURN c.name, i.name
-- Files importing a file: MATCH (f:File)-[:CodeRelation {type: 'IMPORTS'}]->(target:File) WHERE target.name = 'utils.ts' RETURN f.name
-- All connections (with confidence): MATCH (n)-[r:CodeRelation]-(m) WHERE n.name = 'MyClass' AND r.confidence > 0.8 RETURN m.name, r.type, r.confidence
-- Find fuzzy matches: MATCH (n)-[r:CodeRelation]-(m) WHERE r.confidence < 0.8 RETURN n.name, r.reason
+**CodeRelation.type:** CONTAINS, DEFINES, IMPORTS, CALLS, EXTENDS, IMPLEMENTS, HAS_METHOD, OVERRIDES, MEMBER_OF, STEP_IN_PROCESS | Git: AUTHORED, MODIFIED, ON_BRANCH, PRECEDES
 
-For semantic+graph queries, include {{QUERY_VECTOR}} placeholder and provide a 'query' parameter:
+Examples:
+- Callers: MATCH (caller)-[:CodeRelation {type: 'CALLS'}]->(fn:Function {name: 'validate'}) RETURN caller.name, caller.filePath
+- Inheritance: MATCH (child:Class)-[:CodeRelation {type: 'EXTENDS'}]->(parent:Class) RETURN child.name, parent.name
+- Class methods: MATCH (c:Class)-[:CodeRelation {type: 'HAS_METHOD'}]->(m:Method) RETURN c.name, m.name
+- Imports: MATCH (f:File)-[:CodeRelation {type: 'IMPORTS'}]->(g:File) RETURN f.name, g.name
+- With confidence: MATCH (n)-[r:CodeRelation]-(m) WHERE n.name = 'MyClass' AND r.confidence > 0.8 RETURN m.name, r.type
+- Git history: MATCH (a:Author)-[:CodeRelation {type: 'AUTHORED'}]->(c:Commit)-[:CodeRelation {type: 'MODIFIED'}]->(f:File) RETURN f.filePath
+
+For semantic search, use {{QUERY_VECTOR}} + 'query' param:
 CALL QUERY_VECTOR_INDEX('CodeEmbedding', 'code_embedding_idx', {{QUERY_VECTOR}}, 10) YIELD node AS emb, distance
 WITH emb, distance WHERE distance < 0.5
 MATCH (n:Function {id: emb.nodeId}) RETURN n`,
@@ -393,6 +421,7 @@ MATCH (n:Function {id: emb.nodeId}) RETURN n`,
       caseSensitive?: boolean;
       maxResults?: number;
     }) => {
+      logTool('grep', { pattern, fileFilter, caseSensitive, maxResults });
       try {
         const flags = caseSensitive ? 'g' : 'gi';
         let regex: RegExp;
@@ -431,8 +460,9 @@ MATCH (n:Function {id: emb.nodeId}) RETURN n`,
         
         const formatted = results.map(r => `${r.file}:${r.line}: ${r.content}`).join('\n');
         const truncatedMsg = results.length >= limit ? `\n\n(Showing first ${limit} results)` : '';
-        
-        return `Found ${results.length} matches:\n\n${formatted}${truncatedMsg}`;
+        const out = `Found ${results.length} matches:\n\n${formatted}${truncatedMsg}`;
+        logToolResult('grep', out);
+        return out;
       } catch (error) {
         return `Grep error: ${error instanceof Error ? error.message : String(error)}`;
       }
@@ -455,6 +485,7 @@ MATCH (n:Function {id: emb.nodeId}) RETURN n`,
   
   const readTool = tool(
     async ({ filePath }: { filePath: string }) => {
+      logTool('read', { filePath });
       const normalizedRequest = filePath.replace(/\\/g, '/').toLowerCase();
       
       // Try exact match first
@@ -515,11 +546,15 @@ MATCH (n:Function {id: emb.nodeId}) RETURN n`,
       const MAX_CONTENT = 50000;
       if (content.length > MAX_CONTENT) {
         const lines = content.split('\n').length;
-        return `File: ${actualPath} (${lines} lines, truncated)\n\n${content.slice(0, MAX_CONTENT)}\n\n... [truncated]`;
+        const out = `File: ${actualPath} (${lines} lines, truncated)\n\n${content.slice(0, MAX_CONTENT)}\n\n... [truncated]`;
+        logToolResult('read', out);
+        return out;
       }
       
       const lines = content.split('\n').length;
-      return `File: ${actualPath} (${lines} lines)\n\n${content}`;
+      const out = `File: ${actualPath} (${lines} lines)\n\n${content}`;
+      logToolResult('read', out);
+      return out;
     },
     {
       name: 'read',
@@ -536,6 +571,7 @@ MATCH (n:Function {id: emb.nodeId}) RETURN n`,
   
   const overviewTool = tool(
     async () => {
+      logTool('overview', {});
       try {
         const clustersQuery = `
           MATCH (c:Community)
@@ -603,7 +639,7 @@ MATCH (n:Function {id: emb.nodeId}) RETURN n`,
           return `- ${label} (${steps} steps)`;
         });
         
-        return [
+        const out = [
           `CLUSTERS (${clusters.length} total):`,
           `| Cluster | Symbols | Cohesion | Description |`,
           `| --- | --- | --- | --- |`,
@@ -620,6 +656,8 @@ MATCH (n:Function {id: emb.nodeId}) RETURN n`,
           `CRITICAL PATHS:`,
           ...(criticalLines.length > 0 ? criticalLines : ['- None found']),
         ].join('\n');
+        logToolResult('overview', out);
+        return out;
       } catch (error) {
         return `Overview error: ${error instanceof Error ? error.message : String(error)}`;
       }
@@ -637,6 +675,7 @@ MATCH (n:Function {id: emb.nodeId}) RETURN n`,
   
   const exploreTool = tool(
     async ({ target, type }: { target: string; type?: 'symbol' | 'cluster' | 'process' | null }) => {
+      logTool('explore', { target, type });
       const safeTarget = target.replace(/'/g, "''");
       let resolvedType = type ?? null;
       let processRow: any | null = null;
@@ -901,6 +940,7 @@ MATCH (n:Function {id: emb.nodeId}) RETURN n`,
       includeTests?: boolean;
       minConfidence?: number;
     }) => {
+      logTool('impact', { target, direction, maxDepth });
       const depth = Math.min(maxDepth ?? 3, 10);
       const showTests = includeTests ?? false; // Default: exclude test files
       const minConf = minConfidence ?? 0.7; // Default: exclude fuzzy matches (<70% confidence)

@@ -22,6 +22,8 @@ import { hybridSearch } from '../core/search/hybrid-search.js';
 // at server startup — crashes on unsupported Node ABI versions (#89)
 import { LocalBackend } from '../mcp/local/local-backend.js';
 import { mountMCPEndpoints } from './mcp-http.js';
+import { runAnalysisForApi } from './run-analysis.js';
+import { isGitUrl, cloneRepo } from './git-clone.js';
 
 const buildGraph = async (): Promise<{ nodes: GraphNode[]; relationships: GraphRelationship[] }> => {
   const nodes: GraphNode[] = [];
@@ -185,6 +187,64 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
     }
   });
 
+  // Create/rebuild graph (run analysis pipeline)
+  app.post('/api/graph/create', async (req, res) => {
+    try {
+      const urlParam = req.body?.url as string;
+      const repoParam = (req.body?.repo as string) || (req.body?.path as string);
+
+      let repoPath: string;
+
+      if (urlParam && typeof urlParam === 'string' && isGitUrl(urlParam)) {
+        try {
+          const { repoPath: clonedPath } = await cloneRepo(urlParam);
+          repoPath = clonedPath;
+        } catch (cloneErr: any) {
+          const msg = cloneErr?.message || 'Git clone failed';
+          console.error('[api/graph/create] clone:', msg);
+          res.status(400).json({ error: `Clone failed: ${msg}. Ensure git is installed and the URL is valid.` });
+          return;
+        }
+      } else if (repoParam && typeof repoParam === 'string') {
+        const isPath = repoParam.includes(path.sep) || path.isAbsolute(repoParam);
+        if (isPath) {
+          repoPath = path.resolve(repoParam);
+        } else {
+          const entry = await resolveRepo(repoParam);
+          if (!entry) {
+            res.status(404).json({ error: `Repository "${repoParam}" not found in registry` });
+            return;
+          }
+          repoPath = entry.path;
+        }
+      } else {
+        res.status(400).json({ error: 'Missing "url", "repo" or "path" in request body' });
+        return;
+      }
+
+      const force = Boolean(req.body?.force);
+      const embeddings = Boolean(req.body?.embeddings);
+      const gitHistory = Boolean(req.body?.gitHistory);
+
+      const result = await runAnalysisForApi(repoPath, { force, embeddings, gitHistory });
+
+      if (!result.success) {
+        res.status(400).json({ error: result.error || 'Analysis failed' });
+        return;
+      }
+
+      res.json({
+        success: true,
+        stats: result.stats,
+        durationSeconds: result.durationSeconds,
+      });
+    } catch (err: any) {
+      const msg = err?.message || 'Create graph failed';
+      console.error('[api/graph/create]', msg, err?.stack?.slice(0, 200));
+      res.status(500).json({ error: msg });
+    }
+  });
+
   // Get full graph
   app.get('/api/graph', async (req, res) => {
     try {
@@ -212,14 +272,16 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
 
       const entry = await resolveRepo(requestedRepo(req));
       if (!entry) {
-        res.status(404).json({ error: 'Repository not found' });
+        res.status(404).json({ error: 'Repository not found. Run: gitnexus analyze' });
         return;
       }
       const lbugPath = path.join(entry.storagePath, 'lbug');
       const result = await withLbugDb(lbugPath, () => executeQuery(cypher));
       res.json({ result });
     } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Query failed' });
+      const msg = err?.message || 'Query failed';
+      console.error('[api/query]', msg, err?.stack?.slice(0, 200));
+      res.status(500).json({ error: msg });
     }
   });
 

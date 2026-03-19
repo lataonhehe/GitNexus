@@ -106,7 +106,7 @@ export async function getCodebaseStats(
  */
 export async function getHotspots(
   executeQuery: (cypher: string) => Promise<any[]>,
-  limit: number = 8
+  limit: number = 5
 ): Promise<Hotspot[]> {
   try {
     // Find nodes with most edges (both directions)
@@ -149,7 +149,7 @@ export async function getHotspots(
  */
 export async function getFolderTree(
   executeQuery: (cypher: string) => Promise<any[]>,
-  maxDepth: number = 10
+  maxDepth: number = 5
 ): Promise<string> {
   try {
     // Get all file paths
@@ -164,7 +164,7 @@ export async function getFolderTree(
     if (paths.length === 0) return '';
 
     // Use hybrid ASCII format: clear hierarchy with smart truncation
-    return formatAsHybridAscii(paths, maxDepth);
+    return formatAsHybridAscii(paths, maxDepth, 80);
   } catch (error) {
     console.error('Failed to get folder tree:', error);
     return '';
@@ -185,32 +185,30 @@ export async function getFolderTree(
  *   core/ (15 files)
  * test/ (12 files)
  */
-function formatAsHybridAscii(paths: string[], maxDepth: number): string {
-  // Build tree structure
+function formatAsHybridAscii(paths: string[], maxDepth: number, maxLines: number = 120): string {
   interface TreeNode {
     isFile: boolean;
     children: Map<string, TreeNode>;
     fileCount: number;
   }
-  
+
   const root: TreeNode = { isFile: false, children: new Map(), fileCount: 0 };
-  
+
   for (const path of paths) {
     const normalized = path.replace(/\\/g, '/');
     const parts = normalized.split('/').filter(Boolean);
-    
+
     let current = root;
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i];
       const isFile = i === parts.length - 1;
-      
+
       if (!current.children.has(part)) {
         current.children.set(part, { isFile, children: new Map(), fileCount: 0 });
       }
-      
+
       current = current.children.get(part)!;
       if (isFile) {
-        // Count files in parent directories
         let parent = root;
         for (let j = 0; j < i; j++) {
           parent = parent.children.get(parts[j])!;
@@ -219,41 +217,38 @@ function formatAsHybridAscii(paths: string[], maxDepth: number): string {
       }
     }
   }
-  
-  // Render tree with indentation only (no ASCII box chars)
+
   const lines: string[] = [];
-  
-  function renderNode(node: TreeNode, indent: string, depth: number): void {
+
+  function renderNode(node: TreeNode, indent: string, depth: number): boolean {
+    if (lines.length >= maxLines) return false;
     const entries = [...node.children.entries()];
-    // Sort: folders first (by file count desc), then files alphabetically
     entries.sort(([aName, aNode], [bName, bNode]) => {
       if (aNode.isFile !== bNode.isFile) return aNode.isFile ? 1 : -1;
       if (!aNode.isFile && !bNode.isFile) return bNode.fileCount - aNode.fileCount;
       return aName.localeCompare(bName);
     });
-    
+
     for (const [name, childNode] of entries) {
+      if (lines.length >= maxLines) return false;
       if (childNode.isFile) {
-        // File
         lines.push(`${indent}${name}`);
       } else {
-        // Directory
-        const childCount = childNode.children.size;
-        const fileCount = childNode.fileCount;
-        
-        // Only collapse if beyond maxDepth
         if (depth >= maxDepth) {
-          lines.push(`${indent}${name}/ (${fileCount} files)`);
+          lines.push(`${indent}${name}/ (${childNode.fileCount} files)`);
         } else {
           lines.push(`${indent}${name}/`);
-          renderNode(childNode, indent + '  ', depth + 1);
+          if (!renderNode(childNode, indent + '  ', depth + 1)) break;
         }
       }
     }
+    return true;
   }
-  
+
   renderNode(root, '', 0);
-  
+  if (paths.length > 0 && lines.length >= maxLines) {
+    lines.push('... (truncated)');
+  }
   return lines.join('\n');
 }
 
@@ -395,30 +390,21 @@ export function formatContextForPrompt(context: CodebaseContext): string {
   const lines: string[] = [];
   const displayName = shortProjectName(stats.projectName);
   
-  // Project header with stats
-  lines.push(`### 📊 CODEBASE: ${displayName}`);
-  
-  const statParts = [
-    `Files: ${stats.fileCount}`,
-    `Functions: ${stats.functionCount}`,
-    stats.classCount > 0 ? `Classes: ${stats.classCount}` : null,
-    stats.interfaceCount > 0 ? `Interfaces: ${stats.interfaceCount}` : null,
-  ].filter(Boolean);
-  lines.push(statParts.join(' | '));
+  lines.push(`### ${displayName}`);
+  lines.push(`Files: ${stats.fileCount} | Functions: ${stats.functionCount}${stats.classCount > 0 ? ` | Classes: ${stats.classCount}` : ''}`);
   lines.push('');
   
-  // Hotspots
+  // Hotspots (top 3 to save tokens)
   if (hotspots.length > 0) {
-    lines.push('**Hotspots** (most connected):');
-    hotspots.slice(0, 5).forEach(h => {
-      lines.push(`- \`${h.name}\` (${h.type}) — ${h.connections} edges`);
+    lines.push('**Hotspots:**');
+    hotspots.slice(0, 3).forEach(h => {
+      lines.push(`- \`${h.name}\` (${h.type}) ${h.connections}`);
     });
     lines.push('');
   }
   
-  // Folder tree
   if (folderTree) {
-    lines.push('### 📁 STRUCTURE');
+    lines.push('### Structure');
     lines.push('```');
     lines.push(displayName + '/');
     lines.push(folderTree);
@@ -438,11 +424,9 @@ export function buildDynamicSystemPrompt(
 ): string {
   const contextSection = formatContextForPrompt(context);
   
-  // Append context at the END - keeps core instructions at top for better adherence
   return `${basePrompt}
 
 ---
-
-## 📦 CURRENT CODEBASE
+## CODEBASE
 ${contextSection}`;
 }
