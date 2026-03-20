@@ -53,20 +53,28 @@ export async function runAnalysisForApi(
   options: RunAnalysisOptions = {}
 ): Promise<RunAnalysisResult> {
   const t0 = Date.now();
-
-  if (!isGitRepo(repoPath)) {
-    return { success: false, error: 'Not a git repository' };
-  }
-
   const resolvedPath = path.resolve(repoPath);
+  const repoIsGit = isGitRepo(resolvedPath);
+
+  // Git history needs a valid git working tree.
+  if (options?.gitHistory && !repoIsGit) {
+    return { success: false, error: 'Not a git repository (gitHistory requested)' };
+  }
   const { storagePath, lbugPath } = getStoragePaths(resolvedPath);
 
   try {
     await cleanupOldKuzuFiles(storagePath);
-    const currentCommit = getCurrentCommit(resolvedPath);
     const existingMeta = await loadMeta(storagePath);
 
-    if (existingMeta && !options.force && existingMeta.lastCommit === currentCommit) {
+    // For non-git repos (or when gitHistory=false), disable lastCommit caching.
+    const currentCommit = repoIsGit ? getCurrentCommit(resolvedPath) : '';
+    const canCache =
+      repoIsGit
+      && existingMeta
+      && !options.force
+      && existingMeta.lastCommit === currentCommit;
+
+    if (canCache) {
       return {
         success: true,
         stats: existingMeta.stats as RunAnalysisResult['stats'],
@@ -74,7 +82,7 @@ export async function runAnalysisForApi(
       };
     }
 
-    const pipelineOpts: PipelineOptions = { gitHistory: options?.gitHistory };
+    const pipelineOpts: PipelineOptions = { gitHistory: Boolean(options?.gitHistory && repoIsGit) };
     const pipelineResult = await runPipelineFromRepo(resolvedPath, () => {}, pipelineOpts);
 
     await closeLbug();

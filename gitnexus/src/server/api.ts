@@ -12,7 +12,8 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs/promises';
-import { loadMeta, listRegisteredRepos } from '../storage/repo-manager.js';
+import multer from 'multer';
+import { loadMeta, listRegisteredRepos, getGlobalDir } from '../storage/repo-manager.js';
 import { executeQuery, closeLbug, withLbugDb } from '../core/lbug/lbug-adapter.js';
 import { NODE_TABLES } from '../core/lbug/schema.js';
 import { GraphNode, GraphRelationship } from '../core/graph/types.js';
@@ -22,6 +23,7 @@ import { hybridSearch } from '../core/search/hybrid-search.js';
 // at server startup — crashes on unsupported Node ABI versions (#89)
 import { LocalBackend } from '../mcp/local/local-backend.js';
 import { mountMCPEndpoints } from './mcp-http.js';
+import { extractZipToDir } from './zip-extract.js';
 import { runAnalysisForApi } from './run-analysis.js';
 import { isGitUrl, cloneRepo } from './git-clone.js';
 
@@ -141,6 +143,13 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
   }));
   app.use(express.json({ limit: '10mb' }));
 
+  // For ZIP uploads (graph creation from zip)
+  const MAX_ZIP_BYTES = 200 * 1024 * 1024; // 200MB best-effort safeguard
+  const uploadZip = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: MAX_ZIP_BYTES },
+  });
+
   // Initialize MCP backend (multi-repo, shared across all MCP sessions)
   const backend = new LocalBackend();
   await backend.init();
@@ -197,7 +206,8 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
 
       if (urlParam && typeof urlParam === 'string' && isGitUrl(urlParam)) {
         try {
-          const { repoPath: clonedPath } = await cloneRepo(urlParam);
+          const gitHistoryForClone = Boolean(req.body?.gitHistory);
+          const { repoPath: clonedPath } = await cloneRepo(urlParam, { gitHistory: gitHistoryForClone });
           repoPath = clonedPath;
         } catch (cloneErr: any) {
           const msg = cloneErr?.message || 'Git clone failed';
@@ -241,6 +251,69 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
     } catch (err: any) {
       const msg = err?.message || 'Create graph failed';
       console.error('[api/graph/create]', msg, err?.stack?.slice(0, 200));
+      res.status(500).json({ error: msg });
+    }
+  });
+
+  // Create/rebuild graph from an uploaded ZIP file
+  app.post('/api/graph/create-from-zip', uploadZip.single('zip'), async (req, res) => {
+    try {
+      const repoNameRaw = req.body?.repoName;
+      const repoName = typeof repoNameRaw === 'string' ? repoNameRaw.trim() : '';
+
+      if (!repoName || !/^[a-zA-Z0-9._-]{1,120}$/.test(repoName)) {
+        res.status(400).json({ error: 'Invalid or missing "repoName" (allowed: a-zA-Z0-9._-; length<=120).' });
+        return;
+      }
+
+      const uploadFile = (req as any).file as { buffer?: Buffer } | undefined;
+      if (!uploadFile?.buffer) {
+        res.status(400).json({ error: 'Missing zip file. Use multipart field name "zip".' });
+        return;
+      }
+
+      const parseBool = (v: unknown): boolean => {
+        if (typeof v === 'boolean') return v;
+        if (typeof v === 'string') return v === 'true' || v === '1';
+        return false;
+      };
+
+      const force = parseBool(req.body?.force);
+      const embeddings = parseBool(req.body?.embeddings);
+      const gitHistoryRequested = parseBool(req.body?.gitHistory);
+
+      // Unzip into a stable workspace directory so the basename matches repoName.
+      const importsDir = path.join(getGlobalDir(), 'imports');
+      await fs.mkdir(importsDir, { recursive: true });
+
+      const repoPath = path.join(importsDir, repoName);
+      await fs.rm(repoPath, { recursive: true, force: true });
+      await fs.mkdir(repoPath, { recursive: true });
+
+      const { extractedFiles, zipHasGit } = await extractZipToDir(uploadFile.buffer, repoPath);
+      if (extractedFiles === 0) {
+        res.status(400).json({ error: 'ZIP extracted no readable source files.' });
+        return;
+      }
+
+      const gitHistory = gitHistoryRequested && zipHasGit;
+      const result = await runAnalysisForApi(repoPath, { force, embeddings, gitHistory });
+
+      if (!result.success) {
+        res.status(400).json({ error: result.error || 'Analysis failed' });
+        return;
+      }
+
+      res.json({
+        success: true,
+        repoName,
+        gitHistoryUsed: gitHistory,
+        stats: result.stats,
+        durationSeconds: result.durationSeconds,
+      });
+    } catch (err: any) {
+      const msg = err?.message || 'Create graph from zip failed';
+      console.error('[api/graph/create-from-zip]', msg, err?.stack?.slice(0, 200));
       res.status(500).json({ error: msg });
     }
   });
