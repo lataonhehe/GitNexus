@@ -228,3 +228,79 @@ export const fetchClusterDetail = async (
   await assertOk(response);
   return response.json();
 };
+
+export interface CreateGraphResult {
+  success: boolean;
+  repoName?: string;
+  gitHistoryUsed?: boolean;
+  stats?: {
+    files?: number;
+    nodes?: number;
+    edges?: number;
+    communities?: number;
+    processes?: number;
+    embeddings?: number;
+  };
+  durationSeconds?: number;
+}
+
+export interface CreateGraphOptions {
+  force?: boolean;
+  embeddings?: boolean;
+  /**
+   * When true, backend will clone/deepen enough history to support `--git-history`
+   * ingestion. For ZIP imports without `.git`, backend will likely ignore it.
+   */
+  gitHistory?: boolean;
+}
+
+/**
+ * Create/rebuild a graph by uploading a ZIP file to the backend.
+ */
+export const createGraphFromZip = async (
+  repoName: string,
+  zipFile: File,
+  options: CreateGraphOptions = {},
+): Promise<CreateGraphResult> => {
+  const form = new FormData();
+  form.append('repoName', repoName);
+  form.append('zip', zipFile, zipFile.name);
+  form.append('force', String(Boolean(options.force)));
+  form.append('embeddings', String(Boolean(options.embeddings)));
+  form.append('gitHistory', String(Boolean(options.gitHistory)));
+
+  const response = await fetchWithTimeout(
+    `${backendUrl}/api/graph/create-from-zip`,
+    { method: 'POST', body: form },
+    600_000, // can be slow for bigger repos
+  );
+  await assertOk(response);
+  return response.json() as Promise<CreateGraphResult>;
+};
+
+/**
+ * Create/rebuild a graph by cloning a git URL on the backend.
+ */
+export const createGraphFromGit = async (
+  url: string,
+  options: CreateGraphOptions = {},
+): Promise<CreateGraphResult> => {
+  const payload = {
+    url,
+    force: Boolean(options.force),
+    embeddings: Boolean(options.embeddings),
+    gitHistory: Boolean(options.gitHistory),
+  };
+
+  const response = await fetchWithTimeout(
+    `${backendUrl}/api/graph/create`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+    600_000,
+  );
+  await assertOk(response);
+  return response.json() as Promise<CreateGraphResult>;
+};

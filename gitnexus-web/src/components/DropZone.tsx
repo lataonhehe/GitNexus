@@ -7,6 +7,15 @@ import { FileEntry } from '../services/zip';
 interface DropZoneProps {
   onFileSelect: (file: File) => void;
   onGitClone?: (files: FileEntry[]) => void;
+  /**
+   * When provided, graph creation for ZIP/GitHub inputs should be offloaded to
+   * the backend. DropZone will avoid local GitHub cloning.
+   */
+  serverBaseUrl?: string | null;
+  /**
+   * Backend-side creation handler for GitHub URLs.
+   */
+  onGitUrlCreateBackend?: (githubUrl: string, githubToken?: string) => Promise<void>;
   onServerConnect?: (result: ConnectToServerResult, serverUrl?: string) => void;
 }
 
@@ -16,7 +25,13 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export const DropZone = ({ onFileSelect, onGitClone, onServerConnect }: DropZoneProps) => {
+export const DropZone = ({
+  onFileSelect,
+  onGitClone,
+  onGitUrlCreateBackend,
+  onServerConnect,
+  serverBaseUrl,
+}: DropZoneProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const [activeTab, setActiveTab] = useState<'zip' | 'github' | 'server'>('zip');
   const [githubUrl, setGithubUrl] = useState('');
@@ -87,6 +102,27 @@ export const DropZone = ({ onFileSelect, onGitClone, onServerConnect }: DropZone
     const parsed = parseGitHubUrl(githubUrl);
     if (!parsed) {
       setError('Invalid GitHub URL. Use format: https://github.com/owner/repo');
+      return;
+    }
+
+    // Backend mode: do not clone in-browser; ask backend to create the graph.
+    if (serverBaseUrl && onGitUrlCreateBackend) {
+      setError(null);
+      setIsCloning(true);
+      setCloneProgress({ phase: 'creating', percent: 10 });
+
+      try {
+        await onGitUrlCreateBackend(githubUrl, githubToken || undefined);
+        setCloneProgress({ phase: 'complete', percent: 100 });
+        setGithubToken('');
+      } catch (err) {
+        console.error('Backend create failed:', err);
+        const message = err instanceof Error ? err.message : 'Failed to create graph on backend';
+        setError(message);
+      } finally {
+        setIsCloning(false);
+      }
+
       return;
     }
 

@@ -13,6 +13,8 @@ import { FileEntry } from './services/zip';
 import { getActiveProviderConfig } from './core/llm/settings-service';
 import { createKnowledgeGraph } from './core/graph/graph';
 import { connectToServer, fetchRepos, normalizeServerUrl, type ConnectToServerResult } from './services/server-connection';
+import { createGraphFromGit, createGraphFromZip, setBackendUrl } from './services/backend';
+import { parseGitHubUrl } from './services/git-clone';
 
 const AppContent = () => {
   const {
@@ -51,6 +53,26 @@ const AppContent = () => {
     setViewMode('loading');
 
     try {
+      // Backend mode: upload ZIP to server to build KG there.
+      if (serverBaseUrl) {
+        try {
+          const backendOrigin = serverBaseUrl.replace(/\/api\/?$/, '');
+          setBackendUrl(backendOrigin);
+        } catch {}
+
+        await createGraphFromZip(projectName, file, {
+          // ZIP uploads typically don't contain full `.git`, so gitHistory defaults off.
+          force: false,
+          embeddings: false,
+          gitHistory: true,
+        });
+
+        // Reload graph from the backend (ensures UI + agent are consistent).
+        const connected = await connectToServer(serverBaseUrl, undefined, undefined, projectName);
+        handleServerConnect(connected, serverBaseUrl);
+        return;
+      }
+
       const result = await runPipeline(file, (progress) => {
         setProgress(progress);
       });
@@ -87,7 +109,17 @@ const AppContent = () => {
         setProgress(null);
       }, 3000);
     }
-  }, [setViewMode, setGraph, setFileContents, setProgress, setProjectName, runPipeline, startEmbeddings, initializeAgent]);
+  }, [
+    setViewMode,
+    setGraph,
+    setFileContents,
+    setProgress,
+    setProjectName,
+    runPipeline,
+    startEmbeddings,
+    initializeAgent,
+    serverBaseUrl,
+  ]);
 
   const handleGitClone = useCallback(async (files: FileEntry[]) => {
     const firstPath = files[0]?.path || 'repository';
@@ -131,6 +163,53 @@ const AppContent = () => {
       }, 3000);
     }
   }, [setViewMode, setGraph, setFileContents, setProgress, setProjectName, runPipelineFromFiles, startEmbeddings, initializeAgent]);
+
+  const handleGitUrlCreateBackend = useCallback(async (githubUrl: string, githubToken?: string) => {
+    if (!serverBaseUrl) return;
+
+    const parsed = parseGitHubUrl(githubUrl);
+    const projectName = parsed?.repo || 'repository';
+
+    setProjectName(projectName);
+    setProgress({ phase: 'extracting', percent: 0, message: 'Starting...', detail: 'Creating graph on backend' });
+    setViewMode('loading');
+
+    // Ensure backend.ts HTTP client uses the right origin.
+    try {
+      const backendOrigin = serverBaseUrl.replace(/\/api\/?$/, '');
+      setBackendUrl(backendOrigin);
+    } catch {}
+
+    const urlWithToken = githubToken
+      ? githubUrl.replace(
+        /^https:\/\/github\.com\//,
+        `https://${encodeURIComponent(githubToken)}:x-oauth-basic@github.com/`,
+      )
+      : githubUrl;
+
+    try {
+      await createGraphFromGit(urlWithToken, {
+        force: false,
+        embeddings: false,
+        gitHistory: true,
+      });
+
+      const connected = await connectToServer(serverBaseUrl, undefined, undefined, projectName);
+      handleServerConnect(connected, serverBaseUrl);
+    } catch (error) {
+      console.error('Backend create failed:', error);
+      setProgress({
+        phase: 'error',
+        percent: 0,
+        message: 'Error processing repository',
+        detail: error instanceof Error ? error.message : 'Unknown error',
+      });
+      setTimeout(() => {
+        setViewMode('onboarding');
+        setProgress(null);
+      }, 3000);
+    }
+  }, [serverBaseUrl, setProjectName, setProgress, setViewMode]);
 
   const handleServerConnect = useCallback((
     result: ConnectToServerResult,
@@ -202,6 +281,9 @@ const AppContent = () => {
       // Store server URL and fetch available repos for the repo switcher
       setServerBaseUrl(baseUrl);
       try {
+        setBackendUrl(baseUrl.replace(/\/api\/?$/, ''));
+      } catch {}
+      try {
         const repos = await fetchRepos(baseUrl);
         setAvailableRepos(repos);
       } catch (e) {
@@ -239,11 +321,19 @@ const AppContent = () => {
       <DropZone
         onFileSelect={handleFileSelect}
         onGitClone={handleGitClone}
+            serverBaseUrl={serverBaseUrl}
+            onGitUrlCreateBackend={handleGitUrlCreateBackend}
         onServerConnect={async (result, serverUrl) => {
           const baseUrl = serverUrl ? normalizeServerUrl(serverUrl) : undefined;
-          handleServerConnect(result, baseUrl);
           if (baseUrl) {
             setServerBaseUrl(baseUrl);
+                try {
+                  setBackendUrl(baseUrl.replace(/\/api\/?$/, ''));
+                } catch {}
+
+                // Load existing graph immediately when server connects.
+                // This keeps the UI consistent even if the repo is already indexed.
+                handleServerConnect(result, baseUrl);
             try {
               const repos = await fetchRepos(baseUrl);
               setAvailableRepos(repos);
