@@ -1,0 +1,52 @@
+# syntax=docker/dockerfile:1
+FROM node:22-bookworm AS builder
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ENV http_proxy=${HTTP_PROXY} \
+    https_proxy=${HTTPS_PROXY} \
+    no_proxy=${NO_PROXY}
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 make g++ git ca-certificates libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY gitnexus ./gitnexus
+
+RUN cd gitnexus \
+    && npm config set fetch-retries 6 \
+    && npm config set fetch-retry-mintimeout 20000 \
+    && npm config set fetch-timeout 600000 \
+    && npm config set audit false \
+    && npm config set fund false \
+    && if [ -n "$HTTP_PROXY" ]; then npm config set proxy "$HTTP_PROXY"; fi \
+    && if [ -n "$HTTPS_PROXY" ]; then npm config set https-proxy "$HTTPS_PROXY"; fi \
+    && npm ci --omit=optional --prefer-offline --no-audit --progress=false \
+    && npm run build
+
+# ── runtime: Ubuntu 24.04 + Node 22 ─────────────────────────
+FROM ubuntu:24.04 AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates git libstdc++6 \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app/gitnexus
+
+COPY --from=builder /app/gitnexus/package.json ./
+COPY --from=builder /app/gitnexus/node_modules ./node_modules
+COPY --from=builder /app/gitnexus/dist ./dist
+COPY --from=builder /app/gitnexus/vendor ./vendor
+
+ENV HOME=/data/home \
+    NODE_ENV=production \
+    HF_HOME=/data/hf-cache \
+    TRANSFORMERS_CACHE=/data/hf-cache \
+    LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu
+
+EXPOSE 4747
+CMD ["node", "dist/cli/index.js", "serve", "--host", "0.0.0.0", "--port", "4747"]

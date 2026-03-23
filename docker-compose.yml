@@ -1,0 +1,40 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+    ports:
+      - "4747:4747"
+    environment:
+      - HOME=/data/home
+      - NODE_ENV=production
+      # Cache model downloads (embeddings) across container restarts
+      - HF_HOME=/data/hf-cache
+      - TRANSFORMERS_CACHE=/data/hf-cache
+    volumes:
+      - gitnexus-home:/data/home
+      - hf-cache:/data/hf-cache
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+volumes:
+  gitnexus-home:
+  hf-cache:
+
